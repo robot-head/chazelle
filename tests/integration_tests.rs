@@ -222,3 +222,52 @@ fn test_zerocopy_raw_bytes() {
     assert_eq!(tris_recovered[0], tris[0]);
     assert_eq!(tris_recovered[1], tris[1]);
 }
+
+#[test]
+fn test_large_dataset_harmonic_10k() {
+    let poly = chazelle::datasets::generate_harmonic_circle(
+        10_000,
+        1000.0,
+        &[(150.0, 16.0), (50.0, 32.0)],
+    );
+    assert_eq!(poly.len(), 10_000);
+
+    let start = std::time::Instant::now();
+    let tris = chazelle::triangulate_points(&poly).expect("Should triangulate 10k harmonic polygon");
+    let elapsed = start.elapsed();
+    assert_eq!(tris.len(), 9_998);
+
+    println!("10,000-vertex harmonic polygon triangulated in {:?}", elapsed);
+}
+
+#[test]
+fn test_large_dataset_comb_10k() {
+    let poly = chazelle::datasets::generate_comb(3333);
+    assert_eq!(poly.len(), 10_001);
+
+    let start = std::time::Instant::now();
+    let tris = chazelle::triangulate_points(&poly).expect("Should triangulate 10k comb polygon");
+    let elapsed = start.elapsed();
+    assert_eq!(tris.len(), 9_999);
+
+    println!("10,000-vertex comb polygon triangulated in {:?}", elapsed);
+}
+
+#[test]
+fn test_large_dataset_binary_io_10k() {
+    let poly = chazelle::datasets::generate_star(10_000, 500.0, 1000.0);
+    let tmp_path = std::env::temp_dir().join("chazelle_test_poly_10k.bin");
+
+    // Zero-copy binary export
+    chazelle::datasets::save_polygon_binary(&poly, &tmp_path).expect("Save binary");
+
+    // Zero-copy binary reload
+    let loaded = chazelle::datasets::load_polygon_binary(&tmp_path).expect("Load binary");
+    assert_eq!(loaded.len(), poly.len());
+    assert_eq!(loaded, poly);
+
+    let tris = chazelle::triangulate_points(&loaded).expect("Triangulate loaded");
+    assert_eq!(tris.len(), 9_998);
+
+    let _ = std::fs::remove_file(tmp_path);
+}

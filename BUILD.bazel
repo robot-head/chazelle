@@ -1,4 +1,4 @@
-load("@rules_rust//rust:defs.bzl", "rust_library", "rust_static_library", "rust_test")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_static_library", "rust_test", "rust_binary")
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 
 package(default_visibility = ["//visibility:public"])
@@ -57,4 +57,15 @@ cc_test(
     name = "cpp_test",
     srcs = ["tests/cpp_test.cpp"],
     deps = [":chazelle_cc"],
+)
+
+# Benchmark binary producing Bencher Metric Format (BMF) JSON
+rust_binary(
+    name = "bench_triangulation",
+    srcs = ["benches/bench_triangulation.rs"],
+    edition = "2024",
+    deps = [
+        ":chazelle",
+        "@crates//:zerocopy",
+    ],
 )

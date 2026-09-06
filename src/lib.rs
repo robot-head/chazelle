@@ -26,6 +26,7 @@ pub mod up_phase;
 pub mod down_phase;
 pub mod monotone;
 pub mod c_api;
+pub mod datasets;
 
 pub use geometry::Point;
 pub use monotone::TriangulationError;

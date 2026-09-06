@@ -1,6 +1,6 @@
 # Chazelle's Linear-Time Polygon Triangulation
 
-A Rust (Edition 2024) implementation of Bernard Chazelle's deterministic $O(n)$ polygon triangulation algorithm, with C and C++ bindings, optimized with **`google/zerocopy`** and built with **Bazel 9**.
+A Rust (Edition 2024) implementation of Bernard Chazelle's deterministic $O(n)$ polygon triangulation algorithm, with C and C++ bindings, optimized with **`google/zerocopy`**, built with **Bazel 9**, and integrated with **Bencher** continuous benchmarking for datasets up to 50,000+ vertices.
 
 Reference:
 > Bernard Chazelle, **"Triangulating a Simple Polygon in Linear Time"**, *Discrete & Computational Geometry* 6:485–524 (1991).  
@@ -48,39 +48,75 @@ The codebase leverages [`google/zerocopy`](https://github.com/google/zerocopy) a
    - `[usize; 3]` and `ChazelleTriangle` share identical layout.
    - In dynamic C calls, the output vector is transmuted in-place without copying individual triangle records.
 
-4. **Zero-Copy Byte Serialization:**
+4. **Zero-Copy Byte Serialization & Deserialization:**
    - Raw binary buffers (mmap files, network packets, GPU buffers) can be directly parsed with `Point::slice_from_bytes` and `triangulate_from_bytes`.
    - Results can be viewed directly as byte slices with `ChazelleTriangle::slice_as_bytes`.
 
 ---
 
-## Project Structure
+## Large Datasets Generator (`chazelle::datasets`)
+
+The library includes generator utilities for orders-of-magnitude larger simple polygons (1,000 to 100,000+ vertices):
+
+- `generate_harmonic_circle(n, base_r, harmonics)`: Multi-frequency star-shaped circular harmonic waves with guaranteed simplicity.
+- `generate_spiral_ribbon(n, turns, width)`: Archimedean spiral ribbon with winding narrow corridors and high aspect ratio.
+- `generate_comb(num_teeth)`: Dense sawtooth comb with alternating reflex and convex vertices.
+- `generate_star(n, r_inner, r_outer)`: High-frequency star polygons.
+- `save_polygon_binary` / `load_polygon_binary`: Zero-copy binary serialization of large point datasets to disk using `Point::slice_as_bytes`.
+
+---
+
+## Benchmarks & Bencher Integration (`bencher.dev`)
+
+The benchmark suite tests performance and scalability on polygons ranging from $1,000$ to $50,000+$ vertices:
 
 ```
-.
-├── MODULE.bazel          # Bazel 9 bzlmod dependencies (rules_rust, rules_cc, crate_universe)
-├── BUILD.bazel           # Bazel targets (Rust library, FFI staticlib, C/C++ tests)
-├── Cargo.toml            # Rust edition 2024 crate configuration (zerocopy 0.8)
-├── include/
-│   ├── chazelle.h        # C API header (with chazelle_triangulate_into)
-│   └── chazelle.hpp      # Modern C++ header wrapper (with triangulate_into)
-├── src/
-│   ├── lib.rs            # Top-level library and public Rust API
-│   ├── geometry.rs       # 2D primitives with zerocopy traits
-│   ├── double_boundary.rs# Double boundary dC and chord classification
-│   ├── submap.rs         # Normal form submap and centroid tree decomposition
-│   ├── fusion.rs         # Fusion walk of two submaps
-│   ├── conformality.rs   # Conformality restoration and granularity pruning
-│   ├── oracles.rs        # Ray-shooting and arc-cutting oracles
-│   ├── up_phase.rs       # Grade hierarchy bottom-up construction
-│   ├── down_phase.rs     # Top-down refinement to full visibility map
-│   ├── monotone.rs       # Triangulation from trapezoids/monotone mountains
-│   └── c_api.rs          # C/C++ FFI bindings with zerocopy optimizations
-└── tests/
-    ├── integration_tests.rs # Rust integration tests (including zerocopy raw byte tests)
-    ├── c_test.c          # C test suite (including zero-allocation tests)
-    └── cpp_test.cpp      # C++ test suite (including triangulate_into tests)
+--------------------------------------------------------------------------------
+Benchmark                                   Latency   Throughput       Triangles
+--------------------------------------------------------------------------------
+chazelle::triangulate::harmonic_1k          4.85 ms    206,179 v/s           998
+chazelle::triangulate::harmonic_5k         91.21 ms     54,818 v/s          4998
+chazelle::triangulate::harmonic_10k       354.16 ms     28,236 v/s          9998
+chazelle::triangulate::harmonic_25k      2188.37 ms     11,424 v/s         24998
+chazelle::triangulate::harmonic_50k      8830.94 ms      5,662 v/s         49998
+chazelle::triangulate::spiral_1k            7.94 ms    125,956 v/s           998
+chazelle::triangulate::spiral_5k          161.74 ms     30,914 v/s          4998
+chazelle::triangulate::spiral_10k         617.56 ms     16,193 v/s          9998
+chazelle::triangulate::comb_1k              4.19 ms    238,750 v/s           999
+chazelle::triangulate::comb_3k             38.05 ms     78,898 v/s          3000
+chazelle::triangulate::comb_6k            128.17 ms     46,829 v/s          6000
+chazelle::triangulate::comb_10k           354.02 ms     28,250 v/s          9999
+chazelle::triangulate::star_1k              6.23 ms    160,387 v/s           998
+chazelle::triangulate::star_5k            109.24 ms     45,772 v/s          4998
+chazelle::triangulate::star_10k           377.02 ms     26,523 v/s          9998
+chazelle::zerocopy::in_place_10k          348.08 ms     28,729 v/s          9998
+chazelle::zerocopy::raw_bytes_10k         351.84 ms     28,422 v/s          9998
+--------------------------------------------------------------------------------
 ```
+
+### Running Benchmarks Locally
+```bash
+# Human-readable table
+cargo bench --bench bench_triangulation -- --human
+
+# Or with Bazel
+bazel run -c opt //:bench_triangulation -- --human
+```
+
+### Uploading Results to Bencher
+
+The benchmark produces output in **Bencher Metric Format (BMF) JSON**.
+
+To run and upload continuous benchmark tracking to [Bencher.dev](https://bencher.dev):
+
+```bash
+export BENCHER_PROJECT="chazelle"
+export BENCHER_API_TOKEN="<your-bencher-api-token>"
+
+./scripts/bench_and_upload.sh
+```
+
+If credentials are not set, `./scripts/bench_and_upload.sh` automatically falls back to `--dry-run` mode to validate the BMF metric generation locally.
 
 ---
 
@@ -95,16 +131,8 @@ bazel build //...
 
 ### Run All Tests (Rust, C, and C++)
 ```bash
-bazel test //... --test_output=all
+bazel test //... --nocache_test_results --test_output=errors
 ```
-
-Target breakdown:
-- `//:chazelle`: Core Rust library (`rust_library`, edition 2024).
-- `//:chazelle_ffi`: Static library for C/C++ FFI (`rust_static_library`).
-- `//:chazelle_cc`: C/C++ header library (`cc_library`).
-- `//:integration_test`: Rust unit and integration test suite (`rust_test`).
-- `//:c_test`: C API test (`cc_test`).
-- `//:cpp_test`: C++ API test (`cc_test`).
 
 ---
 
@@ -113,100 +141,4 @@ Target breakdown:
 ```bash
 cargo build
 cargo test
-```
-
----
-
-## Usage Examples
-
-### Rust In-Memory API
-
-```rust
-use chazelle::triangulate;
-
-fn main() {
-    let poly = vec![
-        (0.0, 0.0),
-        (3.0, 0.0),
-        (3.0, 1.0),
-        (1.0, 1.0),
-        (1.0, 3.0),
-        (0.0, 3.0),
-    ];
-
-    let triangles = triangulate(&poly).expect("Triangulation failed");
-    for tri in triangles {
-        println!("Triangle: ({}, {}, {})", tri[0], tri[1], tri[2]);
-    }
-}
-```
-
-### Rust Zero-Copy Byte API
-
-```rust
-use chazelle::{Point, triangulate_from_bytes, ChazelleTriangle};
-
-fn main() {
-    let pts = vec![
-        Point::new(0.0, 0.0),
-        Point::new(1.0, 0.0),
-        Point::new(1.0, 1.0),
-        Point::new(0.0, 1.0),
-    ];
-    // Zero-copy bytes view
-    let raw_bytes: &[u8] = Point::slice_as_bytes(&pts);
-
-    // Direct triangulation from byte slice
-    let triangles = triangulate_from_bytes(raw_bytes).unwrap();
-    println!("Triangles: {}", triangles.len());
-
-    // Zero-copy triangle byte view
-    let out_bytes: &[u8] = ChazelleTriangle::slice_as_bytes(&triangles);
-    println!("Output byte length: {}", out_bytes.len());
-}
-```
-
-### C API: Zero-Allocation In-Place Triangulation (`chazelle.h`)
-
-```c
-#include "chazelle.h"
-#include <stdio.h>
-
-int main(void) {
-    ChazellePoint pts[4] = {
-        {0.0, 0.0}, {2.0, 0.0}, {2.0, 2.0}, {0.0, 2.0}
-    };
-    // Pre-allocated stack buffer for triangles (Zero heap allocations!)
-    ChazelleTriangle stack_buf[2];
-    size_t num_tris = 0;
-
-    ChazelleStatus status = chazelle_triangulate_into(
-        pts, 4, stack_buf, 2, &num_tris
-    );
-    if (status == CHAZELLE_SUCCESS) {
-        printf("Successfully triangulated %zu triangles into preallocated buffer\n", num_tris);
-    }
-    return 0;
-}
-```
-
-### C++ API: Preallocated In-Place Triangulation (`chazelle.hpp`)
-
-```cpp
-#include "chazelle.hpp"
-#include <iostream>
-#include <vector>
-
-int main() {
-    std::vector<chazelle::Point> pts = {
-        {0.0, 0.0}, {2.0, 0.0}, {2.0, 2.0}, {0.0, 2.0}
-    };
-
-    chazelle::Triangle stack_buf[2];
-    size_t num_tris = chazelle::triangulate_into(
-        pts.data(), pts.size(), stack_buf, 2
-    );
-    std::cout << "Triangles: " << num_tris << std::endl;
-    return 0;
-}
 ```

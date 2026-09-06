@@ -16,3 +16,8 @@ zerocopy = { version = "0.8", features = ["derive"] }
 [[test]]
 name = "integration_tests"
 path = "tests/integration_tests.rs"
+
+[[bench]]
+name = "bench_triangulation"
+harness = false
+path = "benches/bench_triangulation.rs"

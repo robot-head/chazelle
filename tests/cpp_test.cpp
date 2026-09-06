@@ -20,7 +20,18 @@ int main() {
         assert(e.code == CHAZELLE_ERROR_POLYGON_TOO_SMALL);
     }
 
-    // Test 2: Concave star triangulation
+    // Test 2: Zero-allocation triangulate_into
+    {
+        std::vector<chazelle::Point> square = {
+            {0.0, 0.0}, {2.0, 0.0}, {2.0, 2.0}, {0.0, 2.0}
+        };
+        chazelle::Triangle stack_buf[2];
+        size_t written = chazelle::triangulate_into(square.data(), square.size(), stack_buf, 2);
+        assert(written == 2);
+        assert(stack_buf[0].a < 4 && stack_buf[1].a < 4);
+    }
+
+    // Test 3: Concave star triangulation with vector return
     std::vector<chazelle::Point> star;
     for (int i = 0; i < 10; ++i) {
         double r = (i % 2 == 0) ? 2.0 : 0.8;

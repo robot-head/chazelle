@@ -1,6 +1,6 @@
 # Chazelle's Linear-Time Polygon Triangulation
 
-A Rust (Edition 2024) implementation of Bernard Chazelle's deterministic $O(n)$ polygon triangulation algorithm, with C and C++ bindings and Bazel build integration.
+A Rust (Edition 2024) implementation of Bernard Chazelle's deterministic $O(n)$ polygon triangulation algorithm, with C and C++ bindings, optimized with **`google/zerocopy`** and built with **Bazel 9**.
 
 Reference:
 > Bernard Chazelle, **"Triangulating a Simple Polygon in Linear Time"**, *Discrete & Computational Geometry* 6:485–524 (1991).  
@@ -32,19 +32,41 @@ Triangulating an $n$-vertex simple polygon deterministically in linear time was 
 
 ---
 
+## Optimizations with `google/zerocopy`
+
+The codebase leverages [`google/zerocopy`](https://github.com/google/zerocopy) across the entire data flow:
+
+1. **Zero-Copy Point Memory Casting:**
+   - `Point` and `ChazellePoint` derive `FromBytes, IntoBytes, KnownLayout, Immutable`.
+   - In FFI, pointers passed from C/C++ are safely cast directly into Rust slices without memory copying or heap allocation.
+
+2. **Zero-Allocation In-Place Triangulation (`chazelle_triangulate_into`):**
+   - Allows C and C++ callers to pass pre-allocated memory buffers (e.g. stack buffers or game engine scratchpads).
+   - Triangles are written directly into the destination buffer with zero heap allocation overhead.
+
+3. **In-Place Triangle Transmutation:**
+   - `[usize; 3]` and `ChazelleTriangle` share identical layout.
+   - In dynamic C calls, the output vector is transmuted in-place without copying individual triangle records.
+
+4. **Zero-Copy Byte Serialization:**
+   - Raw binary buffers (mmap files, network packets, GPU buffers) can be directly parsed with `Point::slice_from_bytes` and `triangulate_from_bytes`.
+   - Results can be viewed directly as byte slices with `ChazelleTriangle::slice_as_bytes`.
+
+---
+
 ## Project Structure
 
 ```
 .
-├── MODULE.bazel          # Bazel 9 bzlmod dependencies (rules_rust, rules_cc)
+├── MODULE.bazel          # Bazel 9 bzlmod dependencies (rules_rust, rules_cc, crate_universe)
 ├── BUILD.bazel           # Bazel targets (Rust library, FFI staticlib, C/C++ tests)
-├── Cargo.toml            # Rust edition 2024 crate configuration
+├── Cargo.toml            # Rust edition 2024 crate configuration (zerocopy 0.8)
 ├── include/
-│   ├── chazelle.h        # C API header
-│   └── chazelle.hpp      # Modern C++ header wrapper
+│   ├── chazelle.h        # C API header (with chazelle_triangulate_into)
+│   └── chazelle.hpp      # Modern C++ header wrapper (with triangulate_into)
 ├── src/
 │   ├── lib.rs            # Top-level library and public Rust API
-│   ├── geometry.rs       # 2D primitives, orientation, intersection tests
+│   ├── geometry.rs       # 2D primitives with zerocopy traits
 │   ├── double_boundary.rs# Double boundary dC and chord classification
 │   ├── submap.rs         # Normal form submap and centroid tree decomposition
 │   ├── fusion.rs         # Fusion walk of two submaps
@@ -53,11 +75,11 @@ Triangulating an $n$-vertex simple polygon deterministically in linear time was 
 │   ├── up_phase.rs       # Grade hierarchy bottom-up construction
 │   ├── down_phase.rs     # Top-down refinement to full visibility map
 │   ├── monotone.rs       # Triangulation from trapezoids/monotone mountains
-│   └── c_api.rs          # C/C++ FFI bindings (Rust 2024 #[unsafe(no_mangle)])
+│   └── c_api.rs          # C/C++ FFI bindings with zerocopy optimizations
 └── tests/
-    ├── integration_tests.rs # Rust integration tests (various topologies & 1k vertices)
-    ├── c_test.c          # C binding test suite
-    └── cpp_test.cpp      # C++ binding test suite
+    ├── integration_tests.rs # Rust integration tests (including zerocopy raw byte tests)
+    ├── c_test.c          # C test suite (including zero-allocation tests)
+    └── cpp_test.cpp      # C++ test suite (including triangulate_into tests)
 ```
 
 ---
@@ -97,13 +119,12 @@ cargo test
 
 ## Usage Examples
 
-### Rust API
+### Rust In-Memory API
 
 ```rust
 use chazelle::triangulate;
 
 fn main() {
-    // Define simple polygon vertices (CW or CCW)
     let poly = vec![
         (0.0, 0.0),
         (3.0, 0.0),
@@ -113,7 +134,6 @@ fn main() {
         (0.0, 3.0),
     ];
 
-    // Returns Vec<[usize; 3]> containing indices of triangle vertices
     let triangles = triangulate(&poly).expect("Triangulation failed");
     for tri in triangles {
         println!("Triangle: ({}, {}, {})", tri[0], tri[1], tri[2]);
@@ -121,29 +141,56 @@ fn main() {
 }
 ```
 
-### C API (`chazelle.h`)
+### Rust Zero-Copy Byte API
+
+```rust
+use chazelle::{Point, triangulate_from_bytes, ChazelleTriangle};
+
+fn main() {
+    let pts = vec![
+        Point::new(0.0, 0.0),
+        Point::new(1.0, 0.0),
+        Point::new(1.0, 1.0),
+        Point::new(0.0, 1.0),
+    ];
+    // Zero-copy bytes view
+    let raw_bytes: &[u8] = Point::slice_as_bytes(&pts);
+
+    // Direct triangulation from byte slice
+    let triangles = triangulate_from_bytes(raw_bytes).unwrap();
+    println!("Triangles: {}", triangles.len());
+
+    // Zero-copy triangle byte view
+    let out_bytes: &[u8] = ChazelleTriangle::slice_as_bytes(&triangles);
+    println!("Output byte length: {}", out_bytes.len());
+}
+```
+
+### C API: Zero-Allocation In-Place Triangulation (`chazelle.h`)
 
 ```c
 #include "chazelle.h"
 #include <stdio.h>
 
 int main(void) {
-    ChazellePoint pts[] = {
+    ChazellePoint pts[4] = {
         {0.0, 0.0}, {2.0, 0.0}, {2.0, 2.0}, {0.0, 2.0}
     };
-    ChazelleTriangle* tris = NULL;
+    // Pre-allocated stack buffer for triangles (Zero heap allocations!)
+    ChazelleTriangle stack_buf[2];
     size_t num_tris = 0;
 
-    ChazelleStatus status = chazelle_triangulate(pts, 4, &tris, &num_tris);
+    ChazelleStatus status = chazelle_triangulate_into(
+        pts, 4, stack_buf, 2, &num_tris
+    );
     if (status == CHAZELLE_SUCCESS) {
-        printf("Produced %zu triangles\n", num_tris);
-        chazelle_free_triangles(tris, num_tris);
+        printf("Successfully triangulated %zu triangles into preallocated buffer\n", num_tris);
     }
     return 0;
 }
 ```
 
-### C++ API (`chazelle.hpp`)
+### C++ API: Preallocated In-Place Triangulation (`chazelle.hpp`)
 
 ```cpp
 #include "chazelle.hpp"
@@ -155,12 +202,11 @@ int main() {
         {0.0, 0.0}, {2.0, 0.0}, {2.0, 2.0}, {0.0, 2.0}
     };
 
-    try {
-        std::vector<chazelle::Triangle> tris = chazelle::triangulate(pts);
-        std::cout << "Triangles: " << tris.size() << std::endl;
-    } catch (const chazelle::TriangulationError& err) {
-        std::cerr << "Error: " << err.what() << std::endl;
-    }
+    chazelle::Triangle stack_buf[2];
+    size_t num_tris = chazelle::triangulate_into(
+        pts.data(), pts.size(), stack_buf, 2
+    );
+    std::cout << "Triangles: " << num_tris << std::endl;
     return 0;
 }
 ```

@@ -194,3 +194,31 @@ fn test_thousand_vertex_linear_scaling() {
     verify_triangulation(&poly, &tris);
     println!("1,000-vertex polygon triangulated in {:?}", elapsed);
 }
+
+#[test]
+fn test_zerocopy_raw_bytes() {
+    let pts = vec![
+        Point::new(0.0, 0.0),
+        Point::new(4.0, 0.0),
+        Point::new(4.0, 4.0),
+        Point::new(0.0, 4.0),
+    ];
+
+    // Zero-copy serialization of Point slice to bytes
+    let bytes = Point::slice_as_bytes(&pts);
+    assert_eq!(bytes.len(), 4 * std::mem::size_of::<Point>());
+
+    // Zero-copy deserialization and triangulation
+    let tris = chazelle::triangulate_from_bytes(bytes).expect("Should triangulate from bytes");
+    assert_eq!(tris.len(), 2);
+
+    // Zero-copy serialization of triangles to bytes
+    let tri_bytes = chazelle::ChazelleTriangle::slice_as_bytes(&tris);
+    assert_eq!(tri_bytes.len(), 2 * std::mem::size_of::<chazelle::ChazelleTriangle>());
+
+    // Zero-copy reading of triangles from bytes
+    let tris_recovered = chazelle::ChazelleTriangle::slice_from_bytes(tri_bytes).unwrap();
+    assert_eq!(tris_recovered.len(), 2);
+    assert_eq!(tris_recovered[0], tris[0]);
+    assert_eq!(tris_recovered[1], tris[1]);
+}

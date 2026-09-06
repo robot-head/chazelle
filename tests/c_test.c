@@ -28,7 +28,7 @@ int main(void) {
         assert(status == CHAZELLE_ERROR_POLYGON_TOO_SMALL);
     }
 
-    // Test 3: Square triangulation
+    // Test 3: Zero-Allocation in-place triangulation (chazelle_triangulate_into)
     {
         ChazellePoint pts[4] = {
             {0.0, 0.0},
@@ -36,21 +36,25 @@ int main(void) {
             {2.0, 2.0},
             {0.0, 2.0}
         };
-        ChazelleTriangle* tris = NULL;
+        // Pre-allocated stack buffer for triangles
+        ChazelleTriangle stack_buffer[2];
         size_t num_tris = 0;
-        ChazelleStatus status = chazelle_triangulate(pts, 4, &tris, &num_tris);
+
+        // Test buffer too small error handling
+        ChazelleStatus err_status = chazelle_triangulate_into(pts, 4, stack_buffer, 1, &num_tris);
+        assert(err_status == CHAZELLE_ERROR_BUFFER_TOO_SMALL);
+
+        // Test successful in-place zero-allocation triangulation
+        ChazelleStatus status = chazelle_triangulate_into(pts, 4, stack_buffer, 2, &num_tris);
         assert(status == CHAZELLE_SUCCESS);
         assert(num_tris == 2);
-        assert(tris != NULL);
 
         double total_area = 0.0;
         for (size_t i = 0; i < num_tris; ++i) {
-            assert(tris[i].a < 4 && tris[i].b < 4 && tris[i].c < 4);
-            total_area += triangle_area(pts[tris[i].a], pts[tris[i].b], pts[tris[i].c]);
+            assert(stack_buffer[i].a < 4 && stack_buffer[i].b < 4 && stack_buffer[i].c < 4);
+            total_area += triangle_area(pts[stack_buffer[i].a], pts[stack_buffer[i].b], pts[stack_buffer[i].c]);
         }
         assert(fabs(total_area - 4.0) < 1e-6);
-
-        chazelle_free_triangles(tris, num_tris);
     }
 
     // Test 4: Concave L-shape triangulation

@@ -1,6 +1,9 @@
-//! Core geometric primitives for 2D polygon triangulation.
+//! Core geometric primitives for 2D polygon triangulation with google/zerocopy support.
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+use zerocopy::{FromBytes, IntoBytes, KnownLayout, Immutable};
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, FromBytes, IntoBytes, KnownLayout, Immutable)]
 pub struct Point {
     pub x: f64,
     pub y: f64,
@@ -9,7 +12,7 @@ pub struct Point {
 impl Point {
     pub const EPSILON: f64 = 1e-11;
 
-    pub fn new(x: f64, y: f64) -> Self {
+    pub const fn new(x: f64, y: f64) -> Self {
         Self { x, y }
     }
 
@@ -24,6 +27,18 @@ impl Point {
         let dy = self.y - other.y;
         dx * dx + dy * dy
     }
+
+    /// Zero-copy view of a slice of Points as raw bytes.
+    #[inline]
+    pub fn slice_as_bytes(pts: &[Point]) -> &[u8] {
+        pts.as_bytes()
+    }
+
+    /// Zero-copy view of raw bytes as a slice of Points.
+    #[inline]
+    pub fn slice_from_bytes(bytes: &[u8]) -> Option<&[Point]> {
+        <[Point]>::ref_from_bytes(bytes).ok()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -33,7 +48,7 @@ pub struct Segment {
 }
 
 impl Segment {
-    pub fn new(p1: Point, p2: Point) -> Self {
+    pub const fn new(p1: Point, p2: Point) -> Self {
         Self { p1, p2 }
     }
 }

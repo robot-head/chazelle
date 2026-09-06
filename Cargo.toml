@@ -11,6 +11,7 @@ name = "chazelle"
 crate-type = ["lib", "staticlib", "cdylib"]
 
 [dependencies]
+zerocopy = { version = "0.8", features = ["derive"] }
 
 [[test]]
 name = "integration_tests"

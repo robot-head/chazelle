@@ -7,31 +7,14 @@
 //! > *Discrete & Computational Geometry* 6:485-524 (1991).
 //! > <https://www.cs.princeton.edu/~chazelle/pubs/polygon-triang.pdf>
 //!
-//! ## Overview of the Algorithm
+//! ## Optimizations with `google/zerocopy`
 //!
-//! The algorithm computes a horizontal visibility map (trapezoidal map) of the simple polygon
-//! through two balanced phases:
-//!
-//! 1. **Up-Phase (Bottom-Up, Section 4.1):**
-//!    The polygon boundary is partitioned into dyadic chains across grades $\lambda = 0, \dots, p$.
-//!    For each chain, canonical conformal submaps with bounded granularity are computed and merged
-//!    along balanced binary trees using local ray shooting and the polygon-cutting theorem.
-//!
-//! 2. **Merging Two Submaps (Section 3):**
-//!    - **Fusion (Section 3.1):** Boundary-walking procedure using local shooting in conformal regions.
-//!    - **Restoring Conformality (Section 3.2):** Regions with $> 4$ arcs are split using chords discovered
-//!      via centroid tree search.
-//!    - **Maintaining Granularity (Section 3.3):** Superfluous chords are removed to keep submap size bounded.
-//!
-//! 3. **Down-Phase (Top-Down, Section 4.2):**
-//!    The canonical submap for the entire polygon is refined top-down, restoring missing visibility chords
-//!    until the full horizontal visibility map $V(P)$ emerges at granularity 1.
-//!
-//! 4. **Triangulation (Section 4.3):**
-//!    The horizontal chords from $V(P)$ decompose the polygon into monotone mountains, which are
-//!    triangulated in linear time using a stack.
-//!
-//! Rust Edition 2024 is used throughout, along with complete C/C++ FFI bindings.
+//! This library integrates `zerocopy` to achieve zero-copy data flow across:
+//! - **Memory Casts:** Safe, zero-copy casting between `ChazellePoint`, `Point`, and raw byte buffers.
+//! - **FFI Boundary:** Zero-copy passing of vertex slices from C/C++ without heap allocation or copying.
+//! - **Zero-Allocation Output:** In-place triangulation via [`chazelle_triangulate_into`] directly writing
+//!   into caller-provided buffers.
+//! - **Buffer Transmutation:** In-place transmutation of triangle vectors into C FFI types without element copies.
 
 pub mod geometry;
 pub mod double_boundary;
@@ -46,7 +29,7 @@ pub mod c_api;
 
 pub use geometry::Point;
 pub use monotone::TriangulationError;
-pub use c_api::{ChazellePoint, ChazelleTriangle, ChazelleStatus};
+pub use c_api::{ChazellePoint, ChazelleTriangle, ChazelleStatus, chazelle_triangulate, chazelle_triangulate_into, chazelle_free_triangles};
 
 use geometry::signed_polygon_area;
 use up_phase::UpPhaseHierarchy;
@@ -54,12 +37,6 @@ use down_phase::run_down_phase;
 use monotone::triangulate_from_visibility_map;
 
 /// Triangulate a simple polygon given as a slice of (x, y) coordinate pairs.
-///
-/// The vertices can be in clockwise or counter-clockwise order.
-///
-/// # Returns
-/// A vector of triangles, where each triangle is an array of 3 indices referencing
-/// the vertices of the input polygon.
 ///
 /// # Example
 /// ```
@@ -74,7 +51,7 @@ pub fn triangulate(polygon: &[(f64, f64)]) -> Result<Vec<[usize; 3]>, Triangulat
     triangulate_points(&pts)
 }
 
-/// Triangulate a simple polygon given as a slice of [`Point`]s.
+/// Triangulate a simple polygon given as a slice of [`Point`]s with zero unnecessary copies.
 pub fn triangulate_points(polygon: &[Point]) -> Result<Vec<[usize; 3]>, TriangulationError> {
     let n = polygon.len();
     if n < 3 {
@@ -89,12 +66,9 @@ pub fn triangulate_points(polygon: &[Point]) -> Result<Vec<[usize; 3]>, Triangul
         return Err(TriangulationError::DegeneratePolygon);
     }
 
-    // Normalize polygon to CCW orientation while keeping track of original indices
     let is_ccw = raw_area > 0.0;
     let (ccw_polygon, index_map): (Vec<Point>, Vec<usize>) = if is_ccw {
-        let pts = polygon.to_vec();
-        let map = (0..n).collect();
-        (pts, map)
+        (polygon.to_vec(), (0..n).collect())
     } else {
         let mut pts = Vec::with_capacity(n);
         let mut map = Vec::with_capacity(n);
@@ -121,4 +95,21 @@ pub fn triangulate_points(polygon: &[Point]) -> Result<Vec<[usize; 3]>, Triangul
         .collect();
 
     Ok(mapped_triangles)
+}
+
+/// Zero-copy parsing and triangulation from a raw byte buffer containing `Point` structs.
+pub fn triangulate_from_bytes(bytes: &[u8]) -> Result<Vec<ChazelleTriangle>, TriangulationError> {
+    let pts = Point::slice_from_bytes(bytes).ok_or_else(|| {
+        TriangulationError::InternalError("Invalid byte alignment or length for Point slice".into())
+    })?;
+
+    let mut tris = triangulate_points(pts)?;
+    let c_tris = unsafe {
+        let ptr = tris.as_mut_ptr() as *mut ChazelleTriangle;
+        let len = tris.len();
+        let cap = tris.capacity();
+        std::mem::forget(tris);
+        Vec::from_raw_parts(ptr, len, cap)
+    };
+    Ok(c_tris)
 }

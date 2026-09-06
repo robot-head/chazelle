@@ -3,11 +3,14 @@ load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 
 package(default_visibility = ["//visibility:public"])
 
-# Core Rust library
+# Core Rust library with google/zerocopy
 rust_library(
     name = "chazelle",
     srcs = glob(["src/**/*.rs"]),
     edition = "2024",
+    deps = [
+        "@crates//:zerocopy",
+    ],
 )
 
 # Rust static library for C/C++ FFI
@@ -15,6 +18,9 @@ rust_static_library(
     name = "chazelle_ffi",
     srcs = glob(["src/**/*.rs"]),
     edition = "2024",
+    deps = [
+        "@crates//:zerocopy",
+    ],
 )
 
 # Rust integration tests
@@ -22,7 +28,10 @@ rust_test(
     name = "integration_test",
     srcs = ["tests/integration_tests.rs"],
     edition = "2024",
-    deps = [":chazelle"],
+    deps = [
+        ":chazelle",
+        "@crates//:zerocopy",
+    ],
 )
 
 # C / C++ header library

@@ -1,0 +1,17 @@
+[package]
+name = "chazelle"
+version = "0.1.0"
+edition = "2024"
+authors = ["Antigravity"]
+description = "Linear-time polygon triangulation via Chazelle's algorithm with C/C++ bindings"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "chazelle"
+crate-type = ["lib", "staticlib", "cdylib"]
+
+[dependencies]
+
+[[test]]
+name = "integration_tests"
+path = "tests/integration_tests.rs"

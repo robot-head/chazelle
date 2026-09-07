@@ -8,10 +8,10 @@
 //! > <https://www.cs.princeton.edu/~chazelle/pubs/polygon-triang.pdf>
 //!
 //! ## Alternative Triangulation Solvers Available:
-//! - **Classic Plane Sweep Monotone Decomposition ($O(n \log n)$):**
+//! - **Classic Plane Sweep Monotone Decomposition** ($O(n \log n)$):
 //!   Textbook algorithm (de Berg et al., Preparata & Shamos) using plane-sweep vertex classification
 //!   and linear-time stack-based $y$-monotone polygon triangulation.
-//! - **Seidel's Randomized Algorithm ($O(n \log^* n)$):**
+//! - **Seidel's Randomized Algorithm** ($O(n \log^* n)$):
 //!   Raimund Seidel's incremental randomized trapezoidal decomposition and monotone mountain triangulation.
 //!
 //! ## Optimizations with `google/zerocopy`

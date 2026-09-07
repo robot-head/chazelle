@@ -12,16 +12,16 @@ Reference:
 
 This library provides three polygon triangulation engines accessible via a unified API in Rust, C, and C++:
 
-1. **Bernard Chazelle's Deterministic Linear-Time Algorithm ($O(n)$):**
+1. **Bernard Chazelle's Deterministic Linear-Time Algorithm** ($O(n)$):
    - Purely deterministic, requiring zero randomized coin tosses or sorting.
    - Decomposes polygon boundary into a bottom-up dyadic chain tree of canonical $\gamma$-granular conformal submaps (`UpPhaseHierarchy`), refines visibility down to granularity 1 (`DownPhase`), and extracts non-crossing diagonals to triangulate in linear time.
 
-2. **Classic Monotone Decomposition + Linear Triangulation ($O(n \log n)$):**
+2. **Classic Monotone Decomposition + Linear Triangulation** ($O(n \log n)$):
    - The textbook algorithm (de Berg et al. / Preparata & Shamos).
    - Sweeps a horizontal line from top to bottom, maintaining a sweep-line status structure and helper vertices to decompose the polygon into $y$-monotone pieces by inserting diagonals at Split and Merge vertices.
    - Triangulates each $y$-monotone subpolygon in deterministic $O(k)$ time using a greedy vertex stack (Garey et al. 1978).
 
-3. **Raimund Seidel's Randomized Incremental Algorithm ($O(n \log^* n)$):**
+3. **Raimund Seidel's Randomized Incremental Algorithm** ($O(n \log^* n)$):
    - Reference: R. Seidel, *"A simple and fast randomized incremental algorithm for computing trapezoidal decompositions and for triangulating polygons"*, *Computational Geometry: Theory and Applications* 1:51–64 (1991).
    - Inserts polygon segments in randomized order into a trapezoidal decomposition search structure (DAG), extracts monotone mountains, and triangulates them in linear time.
 
@@ -29,7 +29,7 @@ This library provides three polygon triangulation engines accessible via a unifi
 
 ## Comparative Analysis: When Does Each Algorithm Win?
 
-The optimal choice of algorithm depends fundamentally on **polygon topology (shape)** and **vertex scale ($n$)**.
+The optimal choice of algorithm depends fundamentally on **polygon topology (shape)** and **vertex scale** ($n$).
 
 ### Performance & Topology Matrix
 
@@ -45,7 +45,7 @@ The optimal choice of algorithm depends fundamentally on **polygon topology (sha
 
 ### 1. When is Seidel Better than Monotone Sweep?
 
-#### **Topology: Dense Reflex / High Split-Merge Density ($r \approx n/2$)**
+#### Topology: Dense Reflex / High Split-Merge Density ($r \approx n/2$)
 - **The Mechanism:** 
   - The classic $O(n \log n)$ plane sweep must sort all $n$ vertices by $y$-coordinate upfront. For every vertex, it queries and mutates a sweep-line status search tree (finding the edge directly to the left, inserting/deleting edges, and tracking helper vertices).
   - When a polygon has dense alternating reflex vertices (e.g. **Star polygons**, jagged coastlines, or high-frequency zig-zag profiles), nearly **every single vertex is a Split or Merge vertex**. This forces continuous $O(\log n)$ status-tree rebalancing, helper modifications, and diagonal lookups.
@@ -65,7 +65,7 @@ The optimal choice of algorithm depends fundamentally on **polygon topology (sha
 - On `harmonic_1k` (1,000 vertices), **Chazelle is faster than Seidel** ($1.18\text{ ms}$ vs $1.39\text{ ms}$, throughput $850\text{k v/s}$ vs $718\text{k v/s}$).
 - **Why?** Seidel's randomized incremental construction allocates dynamic DAG nodes (`XNode`, `YNode`, `Sink`) on the heap for each inserted segment. Chazelle's spatial slab bins and contiguous arrays avoid per-node pointer graph churn on moderate scales.
 
-#### **B. Strict Deterministic Worst-Case Guarantees ($O(n)$ Hard Real-Time)**
+#### B. Strict Deterministic Worst-Case Guarantees ($O(n)$ Hard Real-Time)
 - **Seidel's Vulnerability:** Seidel is a *randomized Las Vegas* algorithm. Its expected time is $O(n \log^* n)$, but its worst-case is $O(n^2)$ if the random permutation triggers a degenerate sequence of segment cuts. In safety-critical or hard real-time systems (aerospace CAD, surgical robotics, mission-critical GIS), randomized worst-case degradation is unacceptable.
 - **Monotone Sweep's Vulnerability:** Strictly bounded from below by $\Omega(n \log n)$ due to the sorting requirement.
 - **Chazelle's Advantage:** Provides a strictly deterministic, linear-time $O(n)$ upper bound on all inputs without pseudorandom number generators or seed vulnerabilities.
@@ -74,7 +74,7 @@ The optimal choice of algorithm depends fundamentally on **polygon topology (sha
 
 ### 3. When is Monotone Sweep Better than Both?
 
-#### **Topology: Winding Corridors, Spirals, Glyphs, and Low-Reflex Polygons ($r \ll n$)**
+#### Topology: Winding Corridors, Spirals, Glyphs, and Low-Reflex Polygons ($r \ll n$)
 - **The Mechanism:**
   - A polygon is decomposed into $y$-monotone pieces by inserting diagonals *only* at Split and Merge vertices.
   - If a polygon has very few local extrema (like an **Archimedean spiral ribbon**, CAD extrusions, font glyph outlines, or contour elevation isolines), the sweep line encounters almost zero split/merge events.
@@ -164,7 +164,7 @@ zerocopy::raw_bytes_10k                  72.78 ms      137,405 v/s         9,998
    - FFI pointers passed from C/C++ are safely cast directly into Rust slices without memory copying or heap allocation.
    - `chazelle_triangulate_into` enables zero-allocation in-place buffer filling.
 
-2. **Spatial Slab Binning & Sorted Directional $x$-Pruning (`RayShootingOracle`):**
+2. **Spatial Slab Binning & Sorted Directional X-Pruning** (`RayShootingOracle`):
    - Single-pass uniform vertical slab spatial index (`bin_offsets`, `bin_edges`).
    - Edges in each bin are sorted by $x_{\min}$. Rightward rays break immediately when $x_{\min} > \text{origin}.x + \text{closest\_dist}$; leftward rays break when $x_{\max} < \text{origin}.x - \text{closest\_dist}$.
 

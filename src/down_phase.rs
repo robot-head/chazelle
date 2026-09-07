@@ -9,8 +9,17 @@ use crate::fusion::build_submap_from_chords;
 
 /// Executes the down-phase, refining the coarse submaps from `hierarchy` into the full visibility map V(P).
 pub fn run_down_phase(hierarchy: &UpPhaseHierarchy, polygon: &[Point]) -> Submap {
-    let n = polygon.len();
     let oracle = RayShootingOracle::new(polygon);
+    run_down_phase_with_oracle(hierarchy, polygon, &oracle)
+}
+
+/// Executes the down-phase using a prebuilt spatial oracle.
+pub fn run_down_phase_with_oracle(
+    hierarchy: &UpPhaseHierarchy,
+    polygon: &[Point],
+    oracle: &RayShootingOracle,
+) -> Submap {
+    let n = polygon.len();
 
     // Collect all chords from the top submap
     let mut all_chords = Vec::new();
@@ -31,6 +40,10 @@ pub fn run_down_phase(hierarchy: &UpPhaseHierarchy, polygon: &[Point]) -> Submap
     // For any remaining vertices, shoot horizontal rays to complete V(P)
     let mut chord_id_counter = all_chords.len();
     for v_idx in 0..n {
+        if vertex_has_chord[v_idx] {
+            continue;
+        }
+
         let v = polygon[v_idx];
         let prev_v = polygon[(v_idx + n - 1) % n];
         let next_v = polygon[(v_idx + 1) % n];

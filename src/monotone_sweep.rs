@@ -320,7 +320,7 @@ fn triangulate_subpolygons_with_diagonals(
 }
 
 /// Triangulates a y-monotone piece using the classic linear stack algorithm (Garey et al. 1978).
-fn triangulate_monotone_piece(
+pub fn triangulate_monotone_piece(
     polygon: &[Point],
     piece: &[usize],
 ) -> Result<Vec<[usize; 3]>, TriangulationError> {
@@ -416,10 +416,6 @@ fn triangulate_monotone_piece(
     if triangles.len() == m - 2 {
         Ok(triangles)
     } else {
-        // Ear-clipping fallback for degenerate monotone mountain cuts
-        crate::monotone::triangulate_from_visibility_map(
-            polygon,
-            &crate::submap::Submap::new(1),
-        )
+        Err(TriangulationError::InternalError("Piece not strictly monotone".into()))
     }
 }

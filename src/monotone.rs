@@ -50,22 +50,22 @@ pub fn is_valid_diagonal(u: usize, v: usize, polygon: &[Point]) -> bool {
     let pu = polygon[u];
     let pv = polygon[v];
 
+    let min_x = pu.x.min(pv.x) - Point::EPSILON;
+    let max_x = pu.x.max(pv.x) + Point::EPSILON;
+    let min_y = pu.y.min(pv.y) - Point::EPSILON;
+    let max_y = pu.y.max(pv.y) + Point::EPSILON;
+
     // Check that diagonal does not pass through any other polygon vertex
     for i in 0..n {
         if i == u || i == v {
             continue;
         }
         let p = polygon[i];
+        if p.x < min_x || p.x > max_x || p.y < min_y || p.y > max_y {
+            continue;
+        }
         if orient2d(pu, pv, p).abs() <= Point::EPSILON {
-            let min_x = pu.x.min(pv.x);
-            let max_x = pu.x.max(pv.x);
-            let min_y = pu.y.min(pv.y);
-            let max_y = pu.y.max(pv.y);
-            if p.x >= min_x - Point::EPSILON && p.x <= max_x + Point::EPSILON
-                && p.y >= min_y - Point::EPSILON && p.y <= max_y + Point::EPSILON
-            {
-                return false;
-            }
+            return false;
         }
     }
 
@@ -75,7 +75,12 @@ pub fn is_valid_diagonal(u: usize, v: usize, polygon: &[Point]) -> bool {
         if i == u || i == v || j == u || j == v {
             continue;
         }
-        if segments_intersect_strict(pu, pv, polygon[i], polygon[j]) {
+        let p1 = polygon[i];
+        let p2 = polygon[j];
+        if p1.x.min(p2.x) > max_x || p1.x.max(p2.x) < min_x || p1.y.min(p2.y) > max_y || p1.y.max(p2.y) < min_y {
+            continue;
+        }
+        if segments_intersect_strict(pu, pv, p1, p2) {
             return false;
         }
     }
@@ -95,12 +100,16 @@ pub fn point_inside_simple_polygon(p: Point, polygon: &[Point]) -> bool {
         let p1 = polygon[i];
         let p2 = polygon[j];
 
+        let min_seg_y = p1.y.min(p2.y);
+        let max_seg_y = p1.y.max(p2.y);
+        if p.y < min_seg_y - Point::EPSILON || p.y > max_seg_y + Point::EPSILON {
+            continue;
+        }
+
         // Check if point is on segment
         if (orient2d(p1, p2, p).abs() <= Point::EPSILON)
             && p.x >= p1.x.min(p2.x) - Point::EPSILON
             && p.x <= p1.x.max(p2.x) + Point::EPSILON
-            && p.y >= p1.y.min(p2.y) - Point::EPSILON
-            && p.y <= p1.y.max(p2.y) + Point::EPSILON
         {
             return false; // On boundary
         }
@@ -140,14 +149,39 @@ pub fn triangulate_from_visibility_map(
     // 1. Extract potential diagonals from visibility map chords
     for chord in &visibility_map.chords {
         if let Some(u) = chord.origin_vertex {
+            let prev_u = (u + n - 1) % n;
+            let next_u = (u + 1) % n;
+            // Only reflex / non-strictly-convex vertices need diagonals to resolve non-monotonicity
+            if orient2d(polygon[prev_u], polygon[u], polygon[next_u]) > Point::EPSILON {
+                continue;
+            }
+
             let e1 = chord.hit_edge;
             let e2 = (chord.hit_edge + 1) % n;
 
-            for &v in &[e1, e2] {
+            let d1 = (polygon[e1].x - chord.hit_pt.x).powi(2) + (polygon[e1].y - chord.hit_pt.y).powi(2);
+            let d2 = (polygon[e2].x - chord.hit_pt.x).powi(2) + (polygon[e2].y - chord.hit_pt.y).powi(2);
+            let (v_primary, v_secondary) = if d1 <= d2 { (e1, e2) } else { (e2, e1) };
+
+            for &v in &[v_primary, v_secondary] {
                 let diag = Diagonal::new(u, v);
                 if !valid_diagonals.contains(&diag) && is_valid_diagonal(u, v, polygon) {
                     let mut crosses = false;
+                    let min_x = polygon[diag.u].x.min(polygon[diag.v].x);
+                    let max_x = polygon[diag.u].x.max(polygon[diag.v].x);
+                    let min_y = polygon[diag.u].y.min(polygon[diag.v].y);
+                    let max_y = polygon[diag.u].y.max(polygon[diag.v].y);
+
                     for d in &valid_diagonals {
+                        let d_min_x = polygon[d.u].x.min(polygon[d.v].x);
+                        let d_max_x = polygon[d.u].x.max(polygon[d.v].x);
+                        let d_min_y = polygon[d.u].y.min(polygon[d.v].y);
+                        let d_max_y = polygon[d.u].y.max(polygon[d.v].y);
+
+                        if min_x > d_max_x || max_x < d_min_x || min_y > d_max_y || max_y < d_min_y {
+                            continue;
+                        }
+
                         if segments_intersect_strict(
                             polygon[diag.u],
                             polygon[diag.v],
@@ -160,6 +194,7 @@ pub fn triangulate_from_visibility_map(
                     }
                     if !crosses {
                         valid_diagonals.insert(diag);
+                        break; // One diagonal per chord suffices
                     }
                 }
             }
@@ -229,11 +264,31 @@ fn triangulate_polygon_with_diagonals(
         subpolygons = new_subs;
     }
 
-    // Triangulate each subpolygon
+    // Triangulate each subpolygon: prefer fast linear monotone stack triangulation with area verification
     let mut all_triangles = Vec::new();
     for sub in subpolygons {
-        let tris = triangulate_simple_cycle(polygon, &sub)?;
-        all_triangles.extend(tris);
+        let mut sub_pts = Vec::with_capacity(sub.len());
+        for &idx in &sub {
+            sub_pts.push(polygon[idx]);
+        }
+        let expected_area = signed_polygon_area(&sub_pts).abs();
+
+        let mut success = false;
+        if let Ok(tris) = crate::monotone_sweep::triangulate_monotone_piece(polygon, &sub) {
+            let mut tri_area = 0.0;
+            for &[a, b, c] in &tris {
+                tri_area += signed_polygon_area(&[polygon[a], polygon[b], polygon[c]]).abs();
+            }
+            if (tri_area - expected_area).abs() <= 1e-4 {
+                all_triangles.extend(tris);
+                success = true;
+            }
+        }
+
+        if !success {
+            let tris = triangulate_simple_cycle(polygon, &sub)?;
+            all_triangles.extend(tris);
+        }
     }
 
     if all_triangles.len() != n - 2 {

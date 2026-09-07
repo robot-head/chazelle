@@ -46,7 +46,6 @@ pub use c_api::{
 
 use geometry::signed_polygon_area;
 use up_phase::UpPhaseHierarchy;
-use down_phase::run_down_phase;
 use monotone::triangulate_from_visibility_map;
 
 /// Available polygon triangulation algorithms in the library.
@@ -114,8 +113,9 @@ pub fn triangulate_points_with_algorithm(
                 (pts, map)
             };
 
-            let hierarchy = UpPhaseHierarchy::build(&ccw_polygon);
-            let visibility_map = run_down_phase(&hierarchy, &ccw_polygon);
+            let oracle = oracles::RayShootingOracle::new(&ccw_polygon);
+            let hierarchy = UpPhaseHierarchy::build_with_oracle(&ccw_polygon, &oracle);
+            let visibility_map = down_phase::run_down_phase_with_oracle(&hierarchy, &ccw_polygon, &oracle);
             let ccw_triangles = triangulate_from_visibility_map(&ccw_polygon, &visibility_map)?;
 
             let mapped_triangles = ccw_triangles

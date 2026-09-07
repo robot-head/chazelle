@@ -10,12 +10,16 @@ pub fn fuse_submaps(
     s1: &Submap,
     s2: &Submap,
     polygon: &[Point],
+    oracle: &RayShootingOracle,
     c1_start: usize,
     c1_edges: usize,
+    c1_min_y: f64,
+    c1_max_y: f64,
     c2_start: usize,
     c2_edges: usize,
+    c2_min_y: f64,
+    c2_max_y: f64,
 ) -> Submap {
-    let oracle = RayShootingOracle::new(polygon);
     let n = polygon.len();
 
     let mut merged_chords = Vec::new();
@@ -37,64 +41,72 @@ pub fn fuse_submaps(
         merged_chords.push(new_c);
     }
 
-    // 3. Fusion walk: determine visibility between vertices of C1 and C2
-    // Shoot horizontal rays from vertices of C1 towards C2, and from C2 towards C1
-    let check_vertices_c1 = c1_edges + 1;
-    for offset in 0..check_vertices_c1 {
-        let v_idx = (c1_start + offset) % n;
-        let v = polygon[v_idx];
-        let prev_v = polygon[(v_idx + n - 1) % n];
-        let next_v = polygon[(v_idx + 1) % n];
+    // 3. Fusion walk: only shoot rays if vertical intervals overlap
+    let overlap_min_y = c1_min_y.max(c2_min_y) - Point::EPSILON;
+    let overlap_max_y = c1_max_y.min(c2_max_y) + Point::EPSILON;
 
-        for &dir in &[ChordDirection::Left, ChordDirection::Right] {
-            if is_direction_interior_ccw(v, prev_v, next_v, dir) {
-                // Shoot ray towards C2
-                if let Some((dist, hit_pt, hit_e)) = oracle.shoot_ray(v, dir, c2_start, c2_edges) {
-                    if dist > Point::EPSILON {
-                        let (left, right) = if dir.is_right() { (v, hit_pt) } else { (hit_pt, v) };
-                        merged_chords.push(Chord {
-                            id: chord_id_counter,
-                            y: v.y,
-                            left_pt: left,
-                            right_pt: right,
-                            origin_vertex: Some(v_idx),
-                            hit_edge: hit_e,
-                            hit_pt,
-                            region1: 0,
-                            region2: 0,
-                        });
-                        chord_id_counter += 1;
+    if overlap_min_y <= overlap_max_y {
+        let check_vertices_c1 = c1_edges + 1;
+        for offset in 0..check_vertices_c1 {
+            let v_idx = (c1_start + offset) % n;
+            let v = polygon[v_idx];
+            if v.y < overlap_min_y || v.y > overlap_max_y {
+                continue;
+            }
+            let prev_v = polygon[(v_idx + n - 1) % n];
+            let next_v = polygon[(v_idx + 1) % n];
+
+            for &dir in &[ChordDirection::Left, ChordDirection::Right] {
+                if is_direction_interior_ccw(v, prev_v, next_v, dir) {
+                    if let Some((dist, hit_pt, hit_e)) = oracle.shoot_ray(v, dir, c2_start, c2_edges) {
+                        if dist > Point::EPSILON {
+                            let (left, right) = if dir.is_right() { (v, hit_pt) } else { (hit_pt, v) };
+                            merged_chords.push(Chord {
+                                id: chord_id_counter,
+                                y: v.y,
+                                left_pt: left,
+                                right_pt: right,
+                                origin_vertex: Some(v_idx),
+                                hit_edge: hit_e,
+                                hit_pt,
+                                region1: 0,
+                                region2: 0,
+                            });
+                            chord_id_counter += 1;
+                        }
                     }
                 }
             }
         }
-    }
 
-    let check_vertices_c2 = c2_edges + 1;
-    for offset in 0..check_vertices_c2 {
-        let v_idx = (c2_start + offset) % n;
-        let v = polygon[v_idx];
-        let prev_v = polygon[(v_idx + n - 1) % n];
-        let next_v = polygon[(v_idx + 1) % n];
+        let check_vertices_c2 = c2_edges + 1;
+        for offset in 0..check_vertices_c2 {
+            let v_idx = (c2_start + offset) % n;
+            let v = polygon[v_idx];
+            if v.y < overlap_min_y || v.y > overlap_max_y {
+                continue;
+            }
+            let prev_v = polygon[(v_idx + n - 1) % n];
+            let next_v = polygon[(v_idx + 1) % n];
 
-        for &dir in &[ChordDirection::Left, ChordDirection::Right] {
-            if is_direction_interior_ccw(v, prev_v, next_v, dir) {
-                // Shoot ray towards C1
-                if let Some((dist, hit_pt, hit_e)) = oracle.shoot_ray(v, dir, c1_start, c1_edges) {
-                    if dist > Point::EPSILON {
-                        let (left, right) = if dir.is_right() { (v, hit_pt) } else { (hit_pt, v) };
-                        merged_chords.push(Chord {
-                            id: chord_id_counter,
-                            y: v.y,
-                            left_pt: left,
-                            right_pt: right,
-                            origin_vertex: Some(v_idx),
-                            hit_edge: hit_e,
-                            hit_pt,
-                            region1: 0,
-                            region2: 0,
-                        });
-                        chord_id_counter += 1;
+            for &dir in &[ChordDirection::Left, ChordDirection::Right] {
+                if is_direction_interior_ccw(v, prev_v, next_v, dir) {
+                    if let Some((dist, hit_pt, hit_e)) = oracle.shoot_ray(v, dir, c1_start, c1_edges) {
+                        if dist > Point::EPSILON {
+                            let (left, right) = if dir.is_right() { (v, hit_pt) } else { (hit_pt, v) };
+                            merged_chords.push(Chord {
+                                id: chord_id_counter,
+                                y: v.y,
+                                left_pt: left,
+                                right_pt: right,
+                                origin_vertex: Some(v_idx),
+                                hit_edge: hit_e,
+                                hit_pt,
+                                region1: 0,
+                                region2: 0,
+                            });
+                            chord_id_counter += 1;
+                        }
                     }
                 }
             }

@@ -11,6 +11,8 @@ pub struct ChainGradeNode {
     pub grade: usize,
     pub start_vertex: usize,
     pub num_edges: usize,
+    pub min_y: f64,
+    pub max_y: f64,
     pub submap: Submap,
 }
 
@@ -22,6 +24,12 @@ pub struct UpPhaseHierarchy {
 impl UpPhaseHierarchy {
     /// Executes the up-phase on polygon P (Section 4.1).
     pub fn build(polygon: &[Point]) -> Self {
+        let oracle = crate::oracles::RayShootingOracle::new(polygon);
+        Self::build_with_oracle(polygon, &oracle)
+    }
+
+    /// Executes the up-phase with a prebuilt spatial oracle.
+    pub fn build_with_oracle(polygon: &[Point], oracle: &crate::oracles::RayShootingOracle) -> Self {
         let n = polygon.len();
         if n < 3 {
             return Self { grades: Vec::new() };
@@ -35,11 +43,21 @@ impl UpPhaseHierarchy {
         let mut curr = 0;
         while curr < n {
             let edges = (n - curr).min(base_len);
+            let mut min_y = polygon[curr].y;
+            let mut max_y = polygon[curr].y;
+            for offset in 0..=edges {
+                let y = polygon[(curr + offset) % n].y;
+                if y < min_y { min_y = y; }
+                if y > max_y { max_y = y; }
+            }
+
             let submap = build_submap_from_chords(Vec::new(), curr, edges, polygon, 1);
             grade_0.push(ChainGradeNode {
                 grade: 0,
                 start_vertex: curr,
                 num_edges: edges,
+                min_y,
+                max_y,
                 submap,
             });
             curr += edges;
@@ -63,10 +81,15 @@ impl UpPhaseHierarchy {
                         &c1.submap,
                         &c2.submap,
                         polygon,
+                        oracle,
                         c1.start_vertex,
                         c1.num_edges,
+                        c1.min_y,
+                        c1.max_y,
                         c2.start_vertex,
                         c2.num_edges,
+                        c2.min_y,
+                        c2.max_y,
                     );
 
                     let conformal = restore_conformality(fused, polygon);
@@ -76,6 +99,8 @@ impl UpPhaseHierarchy {
                         grade: current_grade + 1,
                         start_vertex: c1.start_vertex,
                         num_edges: c1.num_edges + c2.num_edges,
+                        min_y: c1.min_y.min(c2.min_y),
+                        max_y: c1.max_y.max(c2.max_y),
                         submap: granular,
                     });
                     i += 2;

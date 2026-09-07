@@ -111,6 +111,19 @@ impl<'a> RayShootingOracle<'a> {
             }
         }
 
+        // Pass 3: sort edges in each bin by min_x for directional early-exit pruning
+        for b in 0..num_bins {
+            let start = bin_offsets[b];
+            let end = bin_offsets[b + 1];
+            if end > start + 1 {
+                bin_edges[start..end].sort_unstable_by(|&e1, &e2| {
+                    let min_x1 = polygon[e1].x.min(polygon[(e1 + 1) % n].x);
+                    let min_x2 = polygon[e2].x.min(polygon[(e2 + 1) % n].x);
+                    min_x1.partial_cmp(&min_x2).unwrap_or(std::cmp::Ordering::Equal)
+                });
+            }
+        }
+
         Self {
             polygon,
             min_y,
@@ -181,27 +194,76 @@ impl<'a> RayShootingOracle<'a> {
             b
         };
 
-        for curr_b in b_start..=b_end {
-            let start_idx = self.bin_offsets[curr_b];
-            let end_idx = self.bin_offsets[curr_b + 1];
+        if dir.is_right() {
+            for curr_b in b_start..=b_end {
+                let start_idx = self.bin_offsets[curr_b];
+                let end_idx = self.bin_offsets[curr_b + 1];
 
-            for idx in start_idx..end_idx {
-                let e = self.bin_edges[idx];
-                if num_edges < n {
-                    let diff = (e + n - start_edge) % n;
-                    if diff >= num_edges {
-                        continue;
+                for idx in start_idx..end_idx {
+                    let e = self.bin_edges[idx];
+                    let next_e = (e + 1) % n;
+                    let p1 = self.polygon[e];
+                    let p2 = self.polygon[next_e];
+
+                    let min_x = p1.x.min(p2.x);
+                    if min_x > origin.x + closest_dist {
+                        break; // Sorted by min_x: all subsequent edges are farther than closest hit
+                    }
+
+                    let max_x = p1.x.max(p2.x);
+                    if max_x < origin.x - Point::EPSILON {
+                        continue; // Completely behind ray
+                    }
+
+                    if num_edges < n {
+                        let diff = (e + n - start_edge) % n;
+                        if diff >= num_edges {
+                            continue;
+                        }
+                    }
+
+                    if let Some((dist, hit_pt)) = ray_h_intersect_segment(origin, true, p1, p2) {
+                        if dist < closest_dist {
+                            closest_dist = dist;
+                            best_hit = Some((dist, hit_pt, e));
+                        }
                     }
                 }
+            }
+        } else {
+            // Left ray: scan from right to left (reverse order)
+            for curr_b in b_start..=b_end {
+                let start_idx = self.bin_offsets[curr_b];
+                let end_idx = self.bin_offsets[curr_b + 1];
 
-                let next_e = (e + 1) % n;
-                let p1 = self.polygon[e];
-                let p2 = self.polygon[next_e];
+                for idx in (start_idx..end_idx).rev() {
+                    let e = self.bin_edges[idx];
+                    let next_e = (e + 1) % n;
+                    let p1 = self.polygon[e];
+                    let p2 = self.polygon[next_e];
 
-                if let Some((dist, hit_pt)) = ray_h_intersect_segment(origin, dir.is_right(), p1, p2) {
-                    if dist < closest_dist {
-                        closest_dist = dist;
-                        best_hit = Some((dist, hit_pt, e));
+                    let max_x = p1.x.max(p2.x);
+                    if max_x < origin.x - closest_dist {
+                        break; // All remaining edges are too far to the left
+                    }
+
+                    let min_x = p1.x.min(p2.x);
+                    if min_x > origin.x + Point::EPSILON {
+                        continue; // Completely behind ray
+                    }
+
+                    if num_edges < n {
+                        let diff = (e + n - start_edge) % n;
+                        if diff >= num_edges {
+                            continue;
+                        }
+                    }
+
+                    if let Some((dist, hit_pt)) = ray_h_intersect_segment(origin, false, p1, p2) {
+                        if dist < closest_dist {
+                            closest_dist = dist;
+                            best_hit = Some((dist, hit_pt, e));
+                        }
                     }
                 }
             }

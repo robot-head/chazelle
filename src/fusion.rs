@@ -134,27 +134,20 @@ pub fn build_submap_from_chords(
     // Sort chords by y
     chords.sort_by(|a, b| a.y.partial_cmp(&b.y).unwrap_or(std::cmp::Ordering::Equal));
 
-    // Deduplicate any overlapping chords
-    let mut unique_chords: Vec<Chord> = Vec::new();
-    for c in chords {
-        if let Some(last) = unique_chords.last() {
-            if (last.y - c.y).abs() <= Point::EPSILON
-                && (last.left_pt.x - c.left_pt.x).abs() <= Point::EPSILON
-                && (last.right_pt.x - c.right_pt.x).abs() <= Point::EPSILON
-            {
-                continue;
-            }
-        }
-        unique_chords.push(c);
-    }
+    // In-place deduplication of overlapping chords
+    chords.dedup_by(|b, a| {
+        (a.y - b.y).abs() <= Point::EPSILON
+            && (a.left_pt.x - b.left_pt.x).abs() <= Point::EPSILON
+            && (a.right_pt.x - b.right_pt.x).abs() <= Point::EPSILON
+    });
 
     // Re-index chords
-    for (i, c) in unique_chords.iter_mut().enumerate() {
+    for (i, c) in chords.iter_mut().enumerate() {
         c.id = i;
     }
 
     // Build regions between consecutive chords
-    let num_c = unique_chords.len();
+    let num_c = chords.len();
     let num_regions = num_c + 1;
     let mut regions = Vec::with_capacity(num_regions);
 
@@ -182,14 +175,14 @@ pub fn build_submap_from_chords(
     }
 
     // Link chords to regions
-    for (i, c) in unique_chords.iter_mut().enumerate() {
+    for (i, c) in chords.iter_mut().enumerate() {
         c.region1 = i;
         c.region2 = i + 1;
     }
 
     Submap {
         regions,
-        chords: unique_chords,
+        chords,
         granularity,
     }
 }

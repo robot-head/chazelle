@@ -37,8 +37,8 @@ impl UpPhaseHierarchy {
 
         let mut grades: Vec<Vec<ChainGradeNode>> = Vec::new();
 
-        // Grade 0: base chains of small length (e.g. 4 edges)
-        let base_len = 4;
+        // Grade 0: base chains of small length (16 edges)
+        let base_len = 16;
         let mut grade_0 = Vec::new();
         let mut curr = 0;
         while curr < n {

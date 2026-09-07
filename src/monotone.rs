@@ -214,54 +214,43 @@ fn triangulate_polygon_with_diagonals(
 ) -> Result<Vec<[usize; 3]>, TriangulationError> {
     let n = polygon.len();
     let initial_chain: Vec<usize> = (0..n).collect();
-
     let mut subpolygons = vec![initial_chain];
 
     for diag in diagonals {
-        let mut new_subs = Vec::new();
-        let mut split_done = false;
+        let mut split_idx = None;
+        let mut split_data = None;
 
-        for sub in subpolygons {
-            if !split_done {
-                if let (Some(pos_u), Some(pos_v)) = (
-                    sub.iter().position(|&x| x == diag.u),
-                    sub.iter().position(|&x| x == diag.v),
-                ) {
-                    let (first, second) = if pos_u < pos_v {
-                        (pos_u, pos_v)
-                    } else {
-                        (pos_v, pos_u)
-                    };
+        for (idx, sub) in subpolygons.iter().enumerate() {
+            if let (Some(pos_u), Some(pos_v)) = (
+                sub.iter().position(|&x| x == diag.u),
+                sub.iter().position(|&x| x == diag.v),
+            ) {
+                let (first, second) = if pos_u < pos_v {
+                    (pos_u, pos_v)
+                } else {
+                    (pos_v, pos_u)
+                };
 
-                    let len = sub.len();
-                    if second > first + 1 && !(first == 0 && second == len - 1) {
-                        let mut sub1 = Vec::new();
-                        for i in first..=second {
-                            sub1.push(sub[i]);
-                        }
+                let len = sub.len();
+                if second > first + 1 && !(first == 0 && second == len - 1) {
+                    let mut sub1 = Vec::with_capacity(second - first + 1);
+                    sub1.extend_from_slice(&sub[first..=second]);
 
-                        let mut sub2 = Vec::new();
-                        for i in second..len {
-                            sub2.push(sub[i]);
-                        }
-                        for i in 0..=first {
-                            sub2.push(sub[i]);
-                        }
+                    let mut sub2 = Vec::with_capacity(len - (second - first) + 1);
+                    sub2.extend_from_slice(&sub[second..len]);
+                    sub2.extend_from_slice(&sub[0..=first]);
 
-                        if sub1.len() >= 3 {
-                            new_subs.push(sub1);
-                        }
-                        if sub2.len() >= 3 {
-                            new_subs.push(sub2);
-                        }
-                        split_done = true;
-                        continue;
-                    }
+                    split_idx = Some(idx);
+                    split_data = Some((sub1, sub2));
+                    break;
                 }
             }
-            new_subs.push(sub);
         }
-        subpolygons = new_subs;
+
+        if let (Some(idx), Some((sub1, sub2))) = (split_idx, split_data) {
+            subpolygons[idx] = sub1;
+            subpolygons.push(sub2);
+        }
     }
 
     // Triangulate each subpolygon: prefer fast linear monotone stack triangulation with area verification

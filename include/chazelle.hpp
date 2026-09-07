@@ -1,7 +1,6 @@
 /**
  * @file chazelle.hpp
- * @brief C++ modern wrapper for Chazelle's linear-time polygon triangulation algorithm.
- * Optimized with google/zerocopy for zero-copy memory manipulation and zero-allocation calls.
+ * @brief C++ modern wrapper for Chazelle's polygon triangulation library.
  */
 
 #ifndef CHAZELLE_HPP
@@ -14,6 +13,12 @@
 #include <string>
 
 namespace chazelle {
+
+enum class Algorithm {
+    Chazelle = CHAZELLE_ALGORITHM_CHAZELLE,
+    MonotoneSweep = CHAZELLE_ALGORITHM_MONOTONE_SWEEP,
+    Seidel = CHAZELLE_ALGORITHM_SEIDEL,
+};
 
 struct Point {
     double x;
@@ -45,20 +50,12 @@ public:
         : std::runtime_error(msg), code(c) {}
 };
 
-/**
- * @brief Zero-allocation triangulation writing directly into caller's pre-allocated buffer.
- *
- * @param points Pointer to points array.
- * @param num_points Number of points.
- * @param out_triangles Destination array with capacity >= num_points - 2.
- * @param out_capacity Capacity of out_triangles.
- * @return size_t Number of triangles written.
- */
 inline size_t triangulate_into(
     const Point* points,
     size_t num_points,
     Triangle* out_triangles,
-    size_t out_capacity
+    size_t out_capacity,
+    Algorithm algo = Algorithm::Chazelle
 ) {
     if (num_points < 3) {
         throw TriangulationError(CHAZELLE_ERROR_POLYGON_TOO_SMALL, "Polygon must have at least 3 vertices");
@@ -68,12 +65,13 @@ inline size_t triangulate_into(
     static_assert(sizeof(Point) == sizeof(ChazellePoint), "Point layout mismatch");
     static_assert(sizeof(Triangle) == sizeof(ChazelleTriangle), "Triangle layout mismatch");
 
-    ChazelleStatus status = chazelle_triangulate_into(
+    ChazelleStatus status = chazelle_triangulate_into_with_algorithm(
         reinterpret_cast<const ChazellePoint*>(points),
         num_points,
         reinterpret_cast<ChazelleTriangle*>(out_triangles),
         out_capacity,
-        &num_written
+        &num_written,
+        static_cast<ChazelleAlgorithm>(algo)
     );
 
     if (status != CHAZELLE_SUCCESS) {
@@ -83,13 +81,10 @@ inline size_t triangulate_into(
     return num_written;
 }
 
-/**
- * @brief Triangulate a simple polygon in linear time using Chazelle's algorithm.
- *
- * @param vertices A list of 2D points representing the simple polygon.
- * @return std::vector<Triangle> List of (N - 2) triangles.
- */
-inline std::vector<Triangle> triangulate(const std::vector<Point>& vertices) {
+inline std::vector<Triangle> triangulate(
+    const std::vector<Point>& vertices,
+    Algorithm algo = Algorithm::Chazelle
+) {
     if (vertices.size() < 3) {
         throw TriangulationError(CHAZELLE_ERROR_POLYGON_TOO_SMALL, "Polygon must have at least 3 vertices");
     }
@@ -101,7 +96,8 @@ inline std::vector<Triangle> triangulate(const std::vector<Point>& vertices) {
         vertices.data(),
         vertices.size(),
         result.data(),
-        result.size()
+        result.size(),
+        algo
     );
 
     result.resize(actual_triangles);

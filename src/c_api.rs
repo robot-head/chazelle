@@ -1,11 +1,11 @@
-//! C/C++ bindings for Chazelle polygon triangulation library with google/zerocopy optimizations.
+//! C/C++ bindings for Chazelle polygon triangulation library with algorithm selection.
 
 use std::ffi::c_char;
 use std::slice;
 use zerocopy::{FromBytes, IntoBytes, KnownLayout, Immutable};
 use crate::geometry::Point;
 use crate::monotone::TriangulationError;
-use crate::triangulate_points;
+use crate::{Algorithm, triangulate_points_with_algorithm};
 
 /// 2D point representation matching C layout and google/zerocopy traits.
 #[repr(C)]
@@ -35,12 +35,10 @@ impl ChazelleTriangle {
         Self { a, b, c }
     }
 
-    /// Zero-copy byte view of a slice of triangles.
     pub fn slice_as_bytes(tris: &[ChazelleTriangle]) -> &[u8] {
         tris.as_bytes()
     }
 
-    /// Zero-copy conversion of raw bytes to a slice of triangles.
     pub fn slice_from_bytes(bytes: &[u8]) -> Option<&[ChazelleTriangle]> {
         <[ChazelleTriangle]>::ref_from_bytes(bytes).ok()
     }
@@ -57,16 +55,37 @@ pub enum ChazelleStatus {
     ErrorBufferTooSmall = 5,
 }
 
-/// Zero-copy, zero-allocation triangulation directly into caller-provided buffer.
-///
-/// Avoids any heap allocation for the output triangles.
+/// Choice of polygon triangulation algorithm for FFI callers.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChazelleAlgorithm {
+    /// Bernard Chazelle's deterministic linear-time O(n) algorithm.
+    Chazelle = 0,
+    /// Classic plane-sweep monotone polygon decomposition in O(n log n).
+    MonotoneSweep = 1,
+    /// Raimund Seidel's randomized incremental algorithm in O(n log* n).
+    Seidel = 2,
+}
+
+impl From<ChazelleAlgorithm> for Algorithm {
+    fn from(a: ChazelleAlgorithm) -> Self {
+        match a {
+            ChazelleAlgorithm::Chazelle => Algorithm::Chazelle,
+            ChazelleAlgorithm::MonotoneSweep => Algorithm::MonotoneSweep,
+            ChazelleAlgorithm::Seidel => Algorithm::Seidel,
+        }
+    }
+}
+
+/// In-place zero-allocation triangulation with algorithm selection.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn chazelle_triangulate_into(
+pub unsafe extern "C" fn chazelle_triangulate_into_with_algorithm(
     points: *const ChazellePoint,
     num_points: usize,
     out_triangles: *mut ChazelleTriangle,
     out_capacity: usize,
     out_num_triangles: *mut usize,
+    algorithm: ChazelleAlgorithm,
 ) -> ChazelleStatus {
     if points.is_null() || out_triangles.is_null() || out_num_triangles.is_null() {
         return ChazelleStatus::ErrorInvalidArgument;
@@ -82,10 +101,9 @@ pub unsafe extern "C" fn chazelle_triangulate_into(
     }
 
     let res = std::panic::catch_unwind(|| {
-        // Zero-copy view: ChazellePoint and Point share identical repr(C) layout
         let pts_slice = unsafe { slice::from_raw_parts(points as *const Point, num_points) };
 
-        match triangulate_points(pts_slice) {
+        match triangulate_points_with_algorithm(pts_slice, algorithm.into()) {
             Ok(tris) => {
                 let count = tris.len();
                 if count > out_capacity {
@@ -116,13 +134,35 @@ pub unsafe extern "C" fn chazelle_triangulate_into(
     }
 }
 
-/// Standard allocating C API with zero-copy internal transmutation.
+/// In-place zero-allocation triangulation using default Chazelle algorithm.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn chazelle_triangulate(
+pub unsafe extern "C" fn chazelle_triangulate_into(
+    points: *const ChazellePoint,
+    num_points: usize,
+    out_triangles: *mut ChazelleTriangle,
+    out_capacity: usize,
+    out_num_triangles: *mut usize,
+) -> ChazelleStatus {
+    unsafe {
+        chazelle_triangulate_into_with_algorithm(
+            points,
+            num_points,
+            out_triangles,
+            out_capacity,
+            out_num_triangles,
+            ChazelleAlgorithm::Chazelle,
+        )
+    }
+}
+
+/// Triangulate with algorithm selection and dynamic memory allocation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn chazelle_triangulate_with_algorithm(
     points: *const ChazellePoint,
     num_points: usize,
     out_triangles: *mut *mut ChazelleTriangle,
     out_num_triangles: *mut usize,
+    algorithm: ChazelleAlgorithm,
 ) -> ChazelleStatus {
     if points.is_null() || out_triangles.is_null() || out_num_triangles.is_null() {
         return ChazelleStatus::ErrorInvalidArgument;
@@ -133,14 +173,11 @@ pub unsafe extern "C" fn chazelle_triangulate(
     }
 
     let res = std::panic::catch_unwind(|| {
-        // Zero-copy view: cast directly without allocating or copying Point array
         let pts_slice = unsafe { slice::from_raw_parts(points as *const Point, num_points) };
 
-        match triangulate_points(pts_slice) {
+        match triangulate_points_with_algorithm(pts_slice, algorithm.into()) {
             Ok(mut tris) => {
                 let count = tris.len();
-                // Zero-copy in-place buffer transmutation of Vec<[usize; 3]> into Vec<ChazelleTriangle>
-                // Guaranteed safe because [usize; 3] and ChazelleTriangle have identical size, alignment, and repr(C)
                 let c_tris: Vec<ChazelleTriangle> = unsafe {
                     let ptr = tris.as_mut_ptr() as *mut ChazelleTriangle;
                     let len = tris.len();
@@ -168,6 +205,25 @@ pub unsafe extern "C" fn chazelle_triangulate(
     match res {
         Ok(status) => status,
         Err(_) => ChazelleStatus::ErrorInternal,
+    }
+}
+
+/// Standard allocating C API using default Chazelle algorithm.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn chazelle_triangulate(
+    points: *const ChazellePoint,
+    num_points: usize,
+    out_triangles: *mut *mut ChazelleTriangle,
+    out_num_triangles: *mut usize,
+) -> ChazelleStatus {
+    unsafe {
+        chazelle_triangulate_with_algorithm(
+            points,
+            num_points,
+            out_triangles,
+            out_num_triangles,
+            ChazelleAlgorithm::Chazelle,
+        )
     }
 }
 

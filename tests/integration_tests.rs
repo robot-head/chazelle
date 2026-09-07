@@ -271,3 +271,43 @@ fn test_large_dataset_binary_io_10k() {
 
     let _ = std::fs::remove_file(tmp_path);
 }
+
+#[test]
+fn test_all_algorithms_on_concave_shapes() {
+    let poly_l = vec![
+        (0.0, 0.0),
+        (3.0, 0.0),
+        (3.0, 1.0),
+        (1.0, 1.0),
+        (1.0, 3.0),
+        (0.0, 3.0),
+    ];
+
+    for &algo in &[
+        chazelle::Algorithm::Chazelle,
+        chazelle::Algorithm::MonotoneSweep,
+        chazelle::Algorithm::Seidel,
+    ] {
+        let tris = chazelle::triangulate_with_algorithm(&poly_l, algo)
+            .expect("Should triangulate L-shape");
+        verify_triangulation(&poly_l, &tris);
+    }
+
+    // 5-point star
+    let mut star = Vec::new();
+    for i in 0..10 {
+        let r = if i % 2 == 0 { 2.0 } else { 0.8 };
+        let angle = i as f64 * std::f64::consts::PI / 5.0;
+        star.push((r * angle.cos(), r * angle.sin()));
+    }
+
+    for &algo in &[
+        chazelle::Algorithm::Chazelle,
+        chazelle::Algorithm::MonotoneSweep,
+        chazelle::Algorithm::Seidel,
+    ] {
+        let tris = chazelle::triangulate_with_algorithm(&star, algo)
+            .expect("Should triangulate star");
+        verify_triangulation(&star, &tris);
+    }
+}

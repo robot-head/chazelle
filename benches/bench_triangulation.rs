@@ -1,7 +1,10 @@
 use std::time::Instant;
 use chazelle::datasets::{generate_comb, generate_harmonic_circle, generate_spiral_ribbon, generate_star};
 use chazelle::geometry::Point;
-use chazelle::{triangulate_points, triangulate_from_bytes, ChazelleTriangle, chazelle_triangulate_into, ChazellePoint};
+use chazelle::{
+    Algorithm, triangulate_points_with_algorithm, triangulate_from_bytes,
+    ChazelleTriangle, chazelle_triangulate_into, ChazellePoint,
+};
 
 struct BenchmarkResult {
     name: String,
@@ -47,60 +50,134 @@ fn main() {
     let human_readable = args.iter().any(|a| a == "--human" || a == "-h");
 
     if human_readable {
-        eprintln!("Running Chazelle linear-time triangulation benchmarks (orders of magnitude larger datasets)...");
+        eprintln!("Benchmarking Chazelle O(n) vs Monotone Sweep O(n log n) vs Seidel O(n log* n)...");
     }
 
     let mut results = Vec::new();
 
-    // 1. Harmonic Circular Waves (1k, 5k, 10k, 25k, 50k vertices)
-    for &n in &[1_000, 5_000, 10_000, 25_000, 50_000] {
+    // 1. Comparison across Algorithms on Harmonic Waves (1k, 5k, 10k)
+    for &n in &[1_000, 5_000, 10_000] {
         let harmonics = [(150.0, 16.0), (50.0, 32.0)];
         let poly = generate_harmonic_circle(n, 1000.0, &harmonics);
-        let iters = if n >= 25_000 { 1 } else { 2 };
 
+        // Chazelle O(n)
         results.push(bench_case(
-            &format!("chazelle::triangulate::harmonic_{}k", n / 1000),
-            n,
-            iters,
-            || triangulate_points(&poly).unwrap().len(),
-        ));
-    }
-
-    // 2. Archimedean Spiral Ribbon (1k, 5k, 10k vertices)
-    for &n in &[1_000, 5_000, 10_000] {
-        let poly = generate_spiral_ribbon(n, 3.0, 20.0);
-        results.push(bench_case(
-            &format!("chazelle::triangulate::spiral_{}k", n / 1000),
+            &format!("chazelle::harmonic_{}k", n / 1000),
             n,
             2,
-            || triangulate_points(&poly).unwrap().len(),
+            || triangulate_points_with_algorithm(&poly, Algorithm::Chazelle).unwrap().len(),
+        ));
+
+        // Monotone Sweep O(n log n)
+        results.push(bench_case(
+            &format!("monotone_sweep::harmonic_{}k", n / 1000),
+            n,
+            2,
+            || triangulate_points_with_algorithm(&poly, Algorithm::MonotoneSweep).unwrap().len(),
+        ));
+
+        // Seidel O(n log* n)
+        results.push(bench_case(
+            &format!("seidel::harmonic_{}k", n / 1000),
+            n,
+            2,
+            || triangulate_points_with_algorithm(&poly, Algorithm::Seidel).unwrap().len(),
         ));
     }
 
-    // 3. Comb / Sawtooth Polygons (1k, 3k, 6k, 10k vertices)
-    for &(teeth, label) in &[(333, "1k"), (1000, "3k"), (2000, "6k"), (3333, "10k")] {
+    // 2. Comparison across Algorithms on Spiral Ribbon (1k, 5k)
+    for &n in &[1_000, 5_000] {
+        let poly = generate_spiral_ribbon(n, 3.0, 20.0);
+
+        results.push(bench_case(
+            &format!("chazelle::spiral_{}k", n / 1000),
+            n,
+            2,
+            || triangulate_points_with_algorithm(&poly, Algorithm::Chazelle).unwrap().len(),
+        ));
+
+        results.push(bench_case(
+            &format!("monotone_sweep::spiral_{}k", n / 1000),
+            n,
+            2,
+            || triangulate_points_with_algorithm(&poly, Algorithm::MonotoneSweep).unwrap().len(),
+        ));
+
+        results.push(bench_case(
+            &format!("seidel::spiral_{}k", n / 1000),
+            n,
+            2,
+            || triangulate_points_with_algorithm(&poly, Algorithm::Seidel).unwrap().len(),
+        ));
+    }
+
+    // 3. Comparison across Algorithms on Comb Polygon (1k, 3k)
+    for &(teeth, label) in &[(333, "1k"), (1000, "3k")] {
         let poly = generate_comb(teeth);
         let n = poly.len();
+
         results.push(bench_case(
-            &format!("chazelle::triangulate::comb_{label}"),
+            &format!("chazelle::comb_{label}"),
             n,
             2,
-            || triangulate_points(&poly).unwrap().len(),
+            || triangulate_points_with_algorithm(&poly, Algorithm::Chazelle).unwrap().len(),
+        ));
+
+        results.push(bench_case(
+            &format!("monotone_sweep::comb_{label}"),
+            n,
+            2,
+            || triangulate_points_with_algorithm(&poly, Algorithm::MonotoneSweep).unwrap().len(),
+        ));
+
+        results.push(bench_case(
+            &format!("seidel::comb_{label}"),
+            n,
+            2,
+            || triangulate_points_with_algorithm(&poly, Algorithm::Seidel).unwrap().len(),
         ));
     }
 
-    // 4. Alternating Stars (1k, 5k, 10k vertices)
-    for &n in &[1_000, 5_000, 10_000] {
+    // 4. Comparison across Algorithms on Star Polygon (1k, 5k)
+    for &n in &[1_000, 5_000] {
         let poly = generate_star(n, 500.0, 1000.0);
+
         results.push(bench_case(
-            &format!("chazelle::triangulate::star_{}k", n / 1000),
+            &format!("chazelle::star_{}k", n / 1000),
             n,
             2,
-            || triangulate_points(&poly).unwrap().len(),
+            || triangulate_points_with_algorithm(&poly, Algorithm::Chazelle).unwrap().len(),
+        ));
+
+        results.push(bench_case(
+            &format!("monotone_sweep::star_{}k", n / 1000),
+            n,
+            2,
+            || triangulate_points_with_algorithm(&poly, Algorithm::MonotoneSweep).unwrap().len(),
+        ));
+
+        results.push(bench_case(
+            &format!("seidel::star_{}k", n / 1000),
+            n,
+            2,
+            || triangulate_points_with_algorithm(&poly, Algorithm::Seidel).unwrap().len(),
         ));
     }
 
-    // 5. Google/zerocopy In-Place Preallocated Triangulation (10k vertices)
+    // 5. Large-scale Chazelle O(n) scaling up to 50k vertices
+    for &n in &[25_000, 50_000] {
+        let harmonics = [(150.0, 16.0), (50.0, 32.0)];
+        let poly = generate_harmonic_circle(n, 1000.0, &harmonics);
+
+        results.push(bench_case(
+            &format!("chazelle::scaling_harmonic_{}k", n / 1000),
+            n,
+            1,
+            || triangulate_points_with_algorithm(&poly, Algorithm::Chazelle).unwrap().len(),
+        ));
+    }
+
+    // 5. Zero-Copy In-Place vs Raw Bytes (10k vertices)
     {
         let n = 10_000;
         let poly = generate_harmonic_circle(n, 1000.0, &[(100.0, 8.0)]);
@@ -108,7 +185,7 @@ fn main() {
         let mut num_written = 0;
 
         results.push(bench_case(
-            "chazelle::zerocopy::in_place_10k",
+            "zerocopy::in_place_10k",
             n,
             2,
             || {
@@ -125,16 +202,10 @@ fn main() {
                 num_written
             },
         ));
-    }
 
-    // 6. Google/zerocopy Raw Byte Parsing & Triangulation (10k vertices)
-    {
-        let n = 10_000;
-        let poly = generate_harmonic_circle(n, 1000.0, &[(100.0, 8.0)]);
         let bytes = Point::slice_as_bytes(&poly);
-
         results.push(bench_case(
-            "chazelle::zerocopy::raw_bytes_10k",
+            "zerocopy::raw_bytes_10k",
             n,
             2,
             || triangulate_from_bytes(bytes).unwrap().len(),
@@ -142,21 +213,21 @@ fn main() {
     }
 
     if human_readable {
-        println!("\n{:-<80}", "");
+        println!("\n{:-<85}", "");
         println!(
-            "{:<40} {:>10} {:>12} {:>15}",
+            "{:<38} {:>10} {:>14} {:>15}",
             "Benchmark", "Latency", "Throughput", "Triangles"
         );
-        println!("{:-<80}", "");
+        println!("{:-<85}", "");
         for r in &results {
             println!(
-                "{:<40} {:>7.2} ms {:>9.0} v/s {:>15}",
+                "{:<38} {:>7.2} ms {:>11.0} v/s {:>15}",
                 r.name, r.mean_ms, r.throughput_vps, r.triangles
             );
         }
-        println!("{:-<80}", "");
+        println!("{:-<85}", "");
     } else {
-        // Output Bencher Metric Format (BMF) JSON
+        // Bencher Metric Format (BMF) JSON output
         println!("{{");
         for (i, r) in results.iter().enumerate() {
             let is_last = i == results.len() - 1;

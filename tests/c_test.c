@@ -83,6 +83,29 @@ int main(void) {
         chazelle_free_triangles(tris, num_tris);
     }
 
+    // Test 5: Triangulation algorithm selection in C
+    {
+        ChazellePoint square[4] = {
+            {0.0, 0.0}, {2.0, 0.0}, {2.0, 2.0}, {0.0, 2.0}
+        };
+        ChazelleTriangle* tris_sweep = NULL;
+        size_t n_sweep = 0;
+        ChazelleStatus s1 = chazelle_triangulate_with_algorithm(
+            square, 4, &tris_sweep, &n_sweep, CHAZELLE_ALGORITHM_MONOTONE_SWEEP
+        );
+        assert(s1 == CHAZELLE_SUCCESS);
+        assert(n_sweep == 2);
+        chazelle_free_triangles(tris_sweep, n_sweep);
+
+        ChazelleTriangle buf_seidel[2];
+        size_t n_seidel = 0;
+        ChazelleStatus s2 = chazelle_triangulate_into_with_algorithm(
+            square, 4, buf_seidel, 2, &n_seidel, CHAZELLE_ALGORITHM_SEIDEL
+        );
+        assert(s2 == CHAZELLE_SUCCESS);
+        assert(n_seidel == 2);
+    }
+
     printf("All C binding tests passed successfully!\n");
     return 0;
 }

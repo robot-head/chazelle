@@ -49,6 +49,18 @@ int main() {
     }
     assert(total_tri_area > 0.0);
 
+    // Test 4: Algorithm choice in C++
+    {
+        std::vector<chazelle::Point> square = {
+            {0.0, 0.0}, {2.0, 0.0}, {2.0, 2.0}, {0.0, 2.0}
+        };
+        auto t_sweep = chazelle::triangulate(square, chazelle::Algorithm::MonotoneSweep);
+        assert(t_sweep.size() == 2);
+
+        auto t_seidel = chazelle::triangulate(square, chazelle::Algorithm::Seidel);
+        assert(t_seidel.size() == 2);
+    }
+
     std::cout << "All C++ binding tests passed successfully!" << std::endl;
     return 0;
 }

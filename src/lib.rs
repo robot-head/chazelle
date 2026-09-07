@@ -7,14 +7,18 @@
 //! > *Discrete & Computational Geometry* 6:485-524 (1991).
 //! > <https://www.cs.princeton.edu/~chazelle/pubs/polygon-triang.pdf>
 //!
-//! ## Optimizations with `google/zerocopy`
+//! ## Alternative Triangulation Solvers Available:
+//! - **Classic Plane Sweep Monotone Decomposition ($O(n \log n)$):**
+//!   Textbook algorithm (de Berg et al., Preparata & Shamos) using plane-sweep vertex classification
+//!   and linear-time stack-based $y$-monotone polygon triangulation.
+//! - **Seidel's Randomized Algorithm ($O(n \log^* n)$):**
+//!   Raimund Seidel's incremental randomized trapezoidal decomposition and monotone mountain triangulation.
 //!
-//! This library integrates `zerocopy` to achieve zero-copy data flow across:
-//! - **Memory Casts:** Safe, zero-copy casting between `ChazellePoint`, `Point`, and raw byte buffers.
-//! - **FFI Boundary:** Zero-copy passing of vertex slices from C/C++ without heap allocation or copying.
-//! - **Zero-Allocation Output:** In-place triangulation via [`chazelle_triangulate_into`] directly writing
-//!   into caller-provided buffers.
-//! - **Buffer Transmutation:** In-place transmutation of triangle vectors into C FFI types without element copies.
+//! ## Optimizations with `google/zerocopy`
+//! - Zero-copy memory casting between `ChazellePoint` and `Point` without heap copies.
+//! - In-place triangulation via [`chazelle_triangulate_into`] directly writing into caller buffers.
+//! - In-place buffer transmutation between `[usize; 3]` and `ChazelleTriangle`.
+//! - Zero-copy binary serialization and deserialization via `Point::slice_from_bytes`.
 
 pub mod geometry;
 pub mod double_boundary;
@@ -25,35 +29,63 @@ pub mod oracles;
 pub mod up_phase;
 pub mod down_phase;
 pub mod monotone;
-pub mod c_api;
+pub mod monotone_sweep;
+pub mod seidel;
 pub mod datasets;
+pub mod c_api;
 
 pub use geometry::Point;
 pub use monotone::TriangulationError;
-pub use c_api::{ChazellePoint, ChazelleTriangle, ChazelleStatus, chazelle_triangulate, chazelle_triangulate_into, chazelle_free_triangles};
+pub use monotone_sweep::triangulate_monotone_sweep;
+pub use seidel::triangulate_seidel;
+pub use c_api::{
+    ChazellePoint, ChazelleTriangle, ChazelleStatus, ChazelleAlgorithm,
+    chazelle_triangulate, chazelle_triangulate_into, chazelle_free_triangles,
+    chazelle_triangulate_with_algorithm, chazelle_triangulate_into_with_algorithm,
+};
 
 use geometry::signed_polygon_area;
 use up_phase::UpPhaseHierarchy;
 use down_phase::run_down_phase;
 use monotone::triangulate_from_visibility_map;
 
-/// Triangulate a simple polygon given as a slice of (x, y) coordinate pairs.
-///
-/// # Example
-/// ```
-/// use chazelle::triangulate;
-///
-/// let poly = vec![(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
-/// let triangles = triangulate(&poly).unwrap();
-/// assert_eq!(triangles.len(), 2);
-/// ```
+/// Available polygon triangulation algorithms in the library.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Algorithm {
+    /// Bernard Chazelle's deterministic linear-time $O(n)$ algorithm (default).
+    #[default]
+    Chazelle,
+    /// Classic textbook plane-sweep monotone decomposition in $O(n \log n)$.
+    MonotoneSweep,
+    /// Raimund Seidel's randomized incremental algorithm in $O(n \log^* n)$.
+    Seidel,
+}
+
+/// Triangulate a simple polygon given as a slice of (x, y) coordinate pairs using the default Chazelle algorithm.
 pub fn triangulate(polygon: &[(f64, f64)]) -> Result<Vec<[usize; 3]>, TriangulationError> {
     let pts: Vec<Point> = polygon.iter().map(|&(x, y)| Point::new(x, y)).collect();
     triangulate_points(&pts)
 }
 
-/// Triangulate a simple polygon given as a slice of [`Point`]s with zero unnecessary copies.
+/// Triangulate a simple polygon using a specified algorithm.
+pub fn triangulate_with_algorithm(
+    polygon: &[(f64, f64)],
+    algorithm: Algorithm,
+) -> Result<Vec<[usize; 3]>, TriangulationError> {
+    let pts: Vec<Point> = polygon.iter().map(|&(x, y)| Point::new(x, y)).collect();
+    triangulate_points_with_algorithm(&pts, algorithm)
+}
+
+/// Triangulate a simple polygon given as a slice of [`Point`]s using Chazelle's linear-time algorithm.
 pub fn triangulate_points(polygon: &[Point]) -> Result<Vec<[usize; 3]>, TriangulationError> {
+    triangulate_points_with_algorithm(polygon, Algorithm::Chazelle)
+}
+
+/// Triangulate a simple polygon given as a slice of [`Point`]s using the selected algorithm.
+pub fn triangulate_points_with_algorithm(
+    polygon: &[Point],
+    algorithm: Algorithm,
+) -> Result<Vec<[usize; 3]>, TriangulationError> {
     let n = polygon.len();
     if n < 3 {
         return Err(TriangulationError::PolygonTooSmall);
@@ -62,40 +94,40 @@ pub fn triangulate_points(polygon: &[Point]) -> Result<Vec<[usize; 3]>, Triangul
         return Ok(vec![[0, 1, 2]]);
     }
 
-    let raw_area = signed_polygon_area(polygon);
-    if raw_area.abs() <= Point::EPSILON {
-        return Err(TriangulationError::DegeneratePolygon);
-    }
+    match algorithm {
+        Algorithm::Chazelle => {
+            let raw_area = signed_polygon_area(polygon);
+            if raw_area.abs() <= Point::EPSILON {
+                return Err(TriangulationError::DegeneratePolygon);
+            }
 
-    let is_ccw = raw_area > 0.0;
-    let (ccw_polygon, index_map): (Vec<Point>, Vec<usize>) = if is_ccw {
-        (polygon.to_vec(), (0..n).collect())
-    } else {
-        let mut pts = Vec::with_capacity(n);
-        let mut map = Vec::with_capacity(n);
-        for i in (0..n).rev() {
-            pts.push(polygon[i]);
-            map.push(i);
+            let is_ccw = raw_area > 0.0;
+            let (ccw_polygon, index_map): (Vec<Point>, Vec<usize>) = if is_ccw {
+                (polygon.to_vec(), (0..n).collect())
+            } else {
+                let mut pts = Vec::with_capacity(n);
+                let mut map = Vec::with_capacity(n);
+                for i in (0..n).rev() {
+                    pts.push(polygon[i]);
+                    map.push(i);
+                }
+                (pts, map)
+            };
+
+            let hierarchy = UpPhaseHierarchy::build(&ccw_polygon);
+            let visibility_map = run_down_phase(&hierarchy, &ccw_polygon);
+            let ccw_triangles = triangulate_from_visibility_map(&ccw_polygon, &visibility_map)?;
+
+            let mapped_triangles = ccw_triangles
+                .into_iter()
+                .map(|[a, b, c]| [index_map[a], index_map[b], index_map[c]])
+                .collect();
+
+            Ok(mapped_triangles)
         }
-        (pts, map)
-    };
-
-    // Step 1: Execute bottom-up Up-Phase
-    let hierarchy = UpPhaseHierarchy::build(&ccw_polygon);
-
-    // Step 2: Execute top-down Down-Phase to obtain full visibility map V(P)
-    let visibility_map = run_down_phase(&hierarchy, &ccw_polygon);
-
-    // Step 3: Triangulate from the visibility map
-    let ccw_triangles = triangulate_from_visibility_map(&ccw_polygon, &visibility_map)?;
-
-    // Remap indices back to the original polygon ordering
-    let mapped_triangles = ccw_triangles
-        .into_iter()
-        .map(|[a, b, c]| [index_map[a], index_map[b], index_map[c]])
-        .collect();
-
-    Ok(mapped_triangles)
+        Algorithm::MonotoneSweep => triangulate_monotone_sweep(polygon),
+        Algorithm::Seidel => triangulate_seidel(polygon),
+    }
 }
 
 /// Zero-copy parsing and triangulation from a raw byte buffer containing `Point` structs.

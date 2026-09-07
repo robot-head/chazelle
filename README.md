@@ -131,27 +131,31 @@ chazelle::spiral_5k                      86.28 ms       57,952 v/s         4,998
 monotone_sweep::spiral_5k                 0.37 ms   13,378,302 v/s         4,998
 seidel::spiral_5k                        83.68 ms       59,748 v/s         4,998
 
-chazelle::comb_1k                         9.64 ms      103,877 v/s           999
-monotone_sweep::comb_1k                   2.09 ms      480,034 v/s           999
-seidel::comb_1k                           5.41 ms      185,100 v/s           999
+chazelle::comb_1k                         6.01 ms      166,597 v/s           999
+monotone_sweep::comb_1k                   2.11 ms      473,431 v/s           999
+seidel::comb_1k                           5.63 ms      177,885 v/s           999
 
-chazelle::comb_3k                       104.32 ms       28,776 v/s         3,000
-monotone_sweep::comb_3k                  18.03 ms      166,455 v/s         3,000
-seidel::comb_3k                          52.62 ms       57,049 v/s         3,000
+chazelle::comb_3k                        55.58 ms       54,015 v/s         3,000
+monotone_sweep::comb_3k                  17.94 ms      167,291 v/s         3,000
+seidel::comb_3k                          53.20 ms       56,432 v/s         3,000
 
-chazelle::star_1k                         2.66 ms      375,876 v/s           998
-monotone_sweep::star_1k                   2.27 ms      440,243 v/s           998
-seidel::star_1k                           1.46 ms      684,247 v/s           998
+chazelle::star_1k                         2.64 ms      379,199 v/s           998
+monotone_sweep::star_1k                   2.35 ms      424,873 v/s           998
+seidel::star_1k                           1.67 ms      599,095 v/s           998
 
-chazelle::star_5k                        54.96 ms       90,978 v/s         4,998
-monotone_sweep::star_5k                  50.88 ms       98,275 v/s         4,998
-seidel::star_5k                          35.87 ms      139,402 v/s         4,998
+chazelle::star_5k                        41.72 ms      119,858 v/s         4,998
+monotone_sweep::star_5k                  51.90 ms       96,335 v/s         4,998
+seidel::star_5k                          36.38 ms      137,449 v/s         4,998
 
-chazelle::scaling_harmonic_25k          454.82 ms       54,966 v/s        24,998
-chazelle::scaling_harmonic_50k        1,876.89 ms       26,640 v/s        49,998
+chazelle::scaling_harmonic_25k          440.82 ms       56,712 v/s        24,998
+chazelle::scaling_harmonic_50k        1,869.31 ms       26,748 v/s        49,998
 
-zerocopy::in_place_10k                   73.44 ms      136,150 v/s         9,998
-zerocopy::raw_bytes_10k                  72.78 ms      137,405 v/s         9,998
+zerocopy::in_place_10k                   74.84 ms      133,617 v/s         9,998
+zerocopy::raw_bytes_10k                  73.54 ms      135,989 v/s         9,998
+
+chazelle::scaling::1_thread_10k          81.36 ms      122,905 v/s         9,998
+chazelle::scaling::4_threads_10k         82.71 ms      120,904 v/s         9,998
+chazelle::scaling::all_cores_10k         81.55 ms      122,626 v/s         9,998
 -------------------------------------------------------------------------------------
 ```
 
@@ -177,6 +181,12 @@ zerocopy::raw_bytes_10k                  72.78 ms      137,405 v/s         9,998
 
 5. **In-Place Granularity & Deduplication:**
    - Replaced temporary collections with in-place `chords.dedup_by(...)` and `chords.retain(...)`.
+
+6. **Work-Stealing Multi-Threaded Parallelism (`rayon`):**
+   - **Dyadic UpPhase Hierarchy:** Parallel pairwise chain fusion at each tree level using `par_iter()`.
+   - **Large-Subchain Fusion Rays:** Concurrent horizontal ray shoots across overlapping subchains.
+   - **DownPhase Visibility Completion:** Parallel independent per-vertex horizontal ray shooting.
+   - **Monotone Subpolygon Triangulation:** Embarrassingly parallel $O(k)$ vertex-stack monotone polygon triangulation across partitioned subpolygons.
 
 ---
 

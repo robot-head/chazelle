@@ -254,30 +254,60 @@ fn triangulate_polygon_with_diagonals(
     }
 
     // Triangulate each subpolygon: prefer fast linear monotone stack triangulation with area verification
-    let mut all_triangles = Vec::new();
-    for sub in subpolygons {
-        let mut sub_pts = Vec::with_capacity(sub.len());
-        for &idx in &sub {
-            sub_pts.push(polygon[idx]);
-        }
-        let expected_area = signed_polygon_area(&sub_pts).abs();
+    use rayon::prelude::*;
 
-        let mut success = false;
-        if let Ok(tris) = crate::monotone_sweep::triangulate_monotone_piece(polygon, &sub) {
-            let mut tri_area = 0.0;
-            for &[a, b, c] in &tris {
-                tri_area += signed_polygon_area(&[polygon[a], polygon[b], polygon[c]]).abs();
-            }
-            if (tri_area - expected_area).abs() <= 1e-4 {
-                all_triangles.extend(tris);
-                success = true;
-            }
-        }
+    let sub_results: Result<Vec<Vec<[usize; 3]>>, TriangulationError> = if subpolygons.len() > 8 {
+        subpolygons
+            .par_iter()
+            .map(|sub| {
+                let mut sub_pts = Vec::with_capacity(sub.len());
+                for &idx in sub {
+                    sub_pts.push(polygon[idx]);
+                }
+                let expected_area = signed_polygon_area(&sub_pts).abs();
 
-        if !success {
-            let tris = triangulate_simple_cycle(polygon, &sub)?;
-            all_triangles.extend(tris);
-        }
+                if let Ok(tris) = crate::monotone_sweep::triangulate_monotone_piece(polygon, sub) {
+                    let mut tri_area = 0.0;
+                    for &[a, b, c] in &tris {
+                        tri_area += signed_polygon_area(&[polygon[a], polygon[b], polygon[c]]).abs();
+                    }
+                    if (tri_area - expected_area).abs() <= 1e-4 {
+                        return Ok(tris);
+                    }
+                }
+
+                triangulate_simple_cycle(polygon, sub)
+            })
+            .collect()
+    } else {
+        subpolygons
+            .iter()
+            .map(|sub| {
+                let mut sub_pts = Vec::with_capacity(sub.len());
+                for &idx in sub {
+                    sub_pts.push(polygon[idx]);
+                }
+                let expected_area = signed_polygon_area(&sub_pts).abs();
+
+                if let Ok(tris) = crate::monotone_sweep::triangulate_monotone_piece(polygon, sub) {
+                    let mut tri_area = 0.0;
+                    for &[a, b, c] in &tris {
+                        tri_area += signed_polygon_area(&[polygon[a], polygon[b], polygon[c]]).abs();
+                    }
+                    if (tri_area - expected_area).abs() <= 1e-4 {
+                        return Ok(tris);
+                    }
+                }
+
+                triangulate_simple_cycle(polygon, sub)
+            })
+            .collect()
+    };
+
+    let sub_triangles = sub_results?;
+    let mut all_triangles = Vec::with_capacity(n.saturating_sub(2));
+    for tris in sub_triangles {
+        all_triangles.extend(tris);
     }
 
     if all_triangles.len() != n - 2 {

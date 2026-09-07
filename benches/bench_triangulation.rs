@@ -212,6 +212,36 @@ fn main() {
         ));
     }
 
+    // 6. Multithreading / Thread Scaling on Large Polygons (10k Harmonic)
+    {
+        let n = 10_000;
+        let harmonics = [(150.0, 16.0), (50.0, 32.0)];
+        let poly = generate_harmonic_circle(n, 1000.0, &harmonics);
+
+        let pool_1 = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
+        results.push(bench_case(
+            "chazelle::scaling::1_thread_10k",
+            n,
+            2,
+            || pool_1.install(|| triangulate_points_with_algorithm(&poly, Algorithm::Chazelle).unwrap().len()),
+        ));
+
+        let pool_4 = rayon::ThreadPoolBuilder::new().num_threads(4).build().unwrap();
+        results.push(bench_case(
+            "chazelle::scaling::4_threads_10k",
+            n,
+            2,
+            || pool_4.install(|| triangulate_points_with_algorithm(&poly, Algorithm::Chazelle).unwrap().len()),
+        ));
+
+        results.push(bench_case(
+            "chazelle::scaling::all_cores_10k",
+            n,
+            2,
+            || triangulate_points_with_algorithm(&poly, Algorithm::Chazelle).unwrap().len(),
+        ));
+    }
+
     if human_readable {
         println!("\n{:-<85}", "");
         println!(

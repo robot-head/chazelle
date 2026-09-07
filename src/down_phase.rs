@@ -38,38 +38,76 @@ pub fn run_down_phase_with_oracle(
     }
 
     // For any remaining vertices, shoot horizontal rays to complete V(P)
-    let mut chord_id_counter = all_chords.len();
-    for v_idx in 0..n {
-        if vertex_has_chord[v_idx] {
-            continue;
-        }
+    let missing_vertices: Vec<usize> = (0..n).filter(|&v| !vertex_has_chord[v]).collect();
+    use rayon::prelude::*;
 
-        let v = polygon[v_idx];
-        let prev_v = polygon[(v_idx + n - 1) % n];
-        let next_v = polygon[(v_idx + 1) % n];
+    let new_chords: Vec<Chord> = if missing_vertices.len() > 64 {
+        missing_vertices
+            .par_iter()
+            .flat_map_iter(|&v_idx| {
+                let v = polygon[v_idx];
+                let prev_v = polygon[(v_idx + n - 1) % n];
+                let next_v = polygon[(v_idx + 1) % n];
+                let mut local = Vec::with_capacity(2);
+                for &dir in &[ChordDirection::Left, ChordDirection::Right] {
+                    if is_direction_interior_ccw(v, prev_v, next_v, dir) {
+                        if let Some((dist, hit_pt, hit_e)) = oracle.shoot_ray(v, dir, 0, n) {
+                            if dist > Point::EPSILON {
+                                let (left, right) = if dir.is_right() { (v, hit_pt) } else { (hit_pt, v) };
+                                local.push(Chord {
+                                    id: 0,
+                                    y: v.y,
+                                    left_pt: left,
+                                    right_pt: right,
+                                    origin_vertex: Some(v_idx),
+                                    hit_edge: hit_e,
+                                    hit_pt,
+                                    region1: 0,
+                                    region2: 0,
+                                });
+                            }
+                        }
+                    }
+                }
+                local
+            })
+            .collect()
+    } else {
+        let mut local = Vec::new();
+        for &v_idx in &missing_vertices {
+            let v = polygon[v_idx];
+            let prev_v = polygon[(v_idx + n - 1) % n];
+            let next_v = polygon[(v_idx + 1) % n];
 
-        for &dir in &[ChordDirection::Left, ChordDirection::Right] {
-            if is_direction_interior_ccw(v, prev_v, next_v, dir) {
-                // Shoot ray across polygon edges
-                if let Some((dist, hit_pt, hit_e)) = oracle.shoot_ray(v, dir, 0, n) {
-                    if dist > Point::EPSILON {
-                        let (left, right) = if dir.is_right() { (v, hit_pt) } else { (hit_pt, v) };
-                        all_chords.push(Chord {
-                            id: chord_id_counter,
-                            y: v.y,
-                            left_pt: left,
-                            right_pt: right,
-                            origin_vertex: Some(v_idx),
-                            hit_edge: hit_e,
-                            hit_pt,
-                            region1: 0,
-                            region2: 0,
-                        });
-                        chord_id_counter += 1;
+            for &dir in &[ChordDirection::Left, ChordDirection::Right] {
+                if is_direction_interior_ccw(v, prev_v, next_v, dir) {
+                    if let Some((dist, hit_pt, hit_e)) = oracle.shoot_ray(v, dir, 0, n) {
+                        if dist > Point::EPSILON {
+                            let (left, right) = if dir.is_right() { (v, hit_pt) } else { (hit_pt, v) };
+                            local.push(Chord {
+                                id: 0,
+                                y: v.y,
+                                left_pt: left,
+                                right_pt: right,
+                                origin_vertex: Some(v_idx),
+                                hit_edge: hit_e,
+                                hit_pt,
+                                region1: 0,
+                                region2: 0,
+                            });
+                        }
                     }
                 }
             }
         }
+        local
+    };
+
+    let mut chord_id_counter = all_chords.len();
+    for mut c in new_chords {
+        c.id = chord_id_counter;
+        chord_id_counter += 1;
+        all_chords.push(c);
     }
 
     // Build the fully refined granularity-1 visibility map
